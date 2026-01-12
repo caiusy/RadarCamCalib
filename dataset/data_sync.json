@@ -1,0 +1,27 @@
+[
+  {
+    "batch_id": 0,
+    "image_path": "images/000.jpg",
+    "radar_json": "radar/000.json"
+  },
+  {
+    "batch_id": 1,
+    "image_path": "images/001.jpg",
+    "radar_json": "radar/001.json"
+  },
+  {
+    "batch_id": 2,
+    "image_path": "images/002.jpg",
+    "radar_json": "radar/002.json"
+  },
+  {
+    "batch_id": 3,
+    "image_path": "images/003.jpg",
+    "radar_json": "radar/003.json"
+  },
+  {
+    "batch_id": 4,
+    "image_path": "images/004.jpg",
+    "radar_json": "radar/004.json"
+  }
+]

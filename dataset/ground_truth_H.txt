@@ -1,0 +1,6 @@
+# Ground Truth Homography Matrix (3x3)
+# Maps Radar (x, y) to Image (u, v)
+# Usage: [u, v, 1]^T = H @ [x, y, 1]^T (then normalize)
+      0.0000      20.0000     640.0000
+    -12.0000       0.0000     860.0000
+      0.0000       0.0000       1.0000

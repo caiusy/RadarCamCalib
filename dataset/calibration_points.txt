@@ -1,0 +1,6 @@
+# Calibration Points: radar_x radar_y img_u img_v
+# These 4 points can be loaded to compute Homography matrix
+20.00 -5.00 540.00 620.00
+20.00 5.00 740.00 620.00
+40.00 -5.00 540.00 380.00
+40.00 5.00 740.00 380.00
