@@ -113,6 +113,15 @@ class Calibration:
         return proj[0]/proj[2], proj[1]/proj[2]
 
 
+# Import calibration manager for BEV projection
+try:
+    from calibration import CalibrationManager as _CalibrationManager
+    CalibrationManager = _CalibrationManager
+except ImportError:
+    # Fallback if calibration.py not available
+    CalibrationManager = None
+
+
 class DataExporter:
     """Handles exporting data to files."""
     

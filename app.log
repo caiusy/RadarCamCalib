@@ -1,0 +1,195 @@
+qt.qpa.fonts: Populating font family aliases took 117 ms. Replace uses of missing font family "Sans-serif" with one that exists to avoid this cost. 
+2026-01-13 21:06:08.222 Python[9566:20827647] +[IMKClient subclass]: chose IMKClient_Modern
+2026-01-13 21:06:08.222 Python[9566:20827647] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+2026-01-13 21:06:12.681 Python[9566:20827647] error messaging the mach port for IMKCFRunLoopWakeUpReliable
+[DEBUG] calib_mgr initialized: True
+[BEV] radar_bev=(np.float64(47.283), np.float64(-9.305)), pitch=0.0
+[BEV] Pitch is 0, skipping image projection
+[DEBUG] radar_bev=(np.float64(47.283), np.float64(-9.305)), pitch=0.0
+[BEV] radar_bev=(np.float64(41.693), np.float64(-6.213)), pitch=0.0
+[BEV] Pitch is 0, skipping image projection
+[DEBUG] radar_bev=(np.float64(41.693), np.float64(-6.213)), pitch=0.0
+[BEV] radar_bev=(np.float64(27.63), np.float64(-7.127)), pitch=0.0
+[BEV] Pitch is 0, skipping image projection
+[DEBUG] radar_bev=(np.float64(27.63), np.float64(-7.127)), pitch=0.0
+[DEBUG] _onComputePitch called
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV
+[DEBUG] _onComputePitch called
+[DEBUG] Pitch computed: -0.9781154438344651
+[DEBUG] _refreshBEV called
+[REFRESH] Clearing BEV, batch=0
+[DEBUG] Added 5 radar points to BEV

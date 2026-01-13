@@ -32,16 +32,6 @@ from backend import DataManager, Calibration, DataExporter
 from viewports import ImageViewport, BEVViewport
 from operations import OperationsController, AppMode
 
-try:
-    from calib_manager import CalibrationManager
-except ImportError:
-    CalibrationManager = None
-
-try:
-    from calib_manager import CalibrationManager
-except ImportError:
-    CalibrationManager = None
-
 
 class MainWindow(QMainWindow):
     """Main application window."""
@@ -57,15 +47,6 @@ class MainWindow(QMainWindow):
         
         # Operations
         self.ops = OperationsController()
-        
-        # Calibration manager
-        self.calib_mgr = CalibrationManager() if CalibrationManager else None
-        if self.calib_mgr:
-            # Sync default params
-            self.calib_mgr.update_camera_params(height=1.5, fx=1000, fy=1000, cx=640, cy=480)
-            self.calib_mgr.update_radar_params(yaw=0, x_offset=3.5, y_offset=0)
-        
-        print(f"[DEBUG] calib_mgr initialized: {self.calib_mgr is not None}")
         
         self._setupUI()
         self._connectSignals()
@@ -141,94 +122,19 @@ class MainWindow(QMainWindow):
         
         # === Camera ===
         g4 = QGroupBox("Camera")
-        l4 = QVBoxLayout(g4)
-        l4.setSpacing(2)
-        # Row 1: H, Pitch(readonly)
-        r1 = QHBoxLayout()
-        r1.addWidget(QLabel("H:"))
+        l4 = QHBoxLayout(g4)
+        l4.addWidget(QLabel("H:"))
         self.spin_h = QDoubleSpinBox()
         self.spin_h.setRange(0.5, 5.0)
         self.spin_h.setValue(1.5)
         self.spin_h.setSuffix("m")
-        self.spin_h.setFixedWidth(70)
-        r1.addWidget(self.spin_h)
-        r1.addWidget(QLabel("Pitch:"))
-        self.lbl_pitch = QLabel("0.0000")
-        self.lbl_pitch.setStyleSheet("color: #888; font-family: monospace;")
-        self.lbl_pitch.setFixedWidth(60)
-        r1.addWidget(self.lbl_pitch)
-        l4.addLayout(r1)
-        # Row 2: fx, fy
-        r2 = QHBoxLayout()
-        r2.addWidget(QLabel("fx:"))
+        l4.addWidget(self.spin_h)
+        l4.addWidget(QLabel("fx:"))
         self.spin_fx = QDoubleSpinBox()
-        self.spin_fx.setRange(100, 3000)
+        self.spin_fx.setRange(100, 5000)
         self.spin_fx.setValue(1000)
-        self.spin_fx.setDecimals(0)
-        self.spin_fx.setFixedWidth(70)
-        r2.addWidget(self.spin_fx)
-        r2.addWidget(QLabel("fy:"))
-        self.spin_fy = QDoubleSpinBox()
-        self.spin_fy.setRange(100, 3000)
-        self.spin_fy.setValue(1000)
-        self.spin_fy.setDecimals(0)
-        self.spin_fy.setFixedWidth(70)
-        r2.addWidget(self.spin_fy)
-        l4.addLayout(r2)
-        # Row 3: cx, cy
-        r3 = QHBoxLayout()
-        r3.addWidget(QLabel("cx:"))
-        self.spin_cx = QDoubleSpinBox()
-        self.spin_cx.setRange(0, 2000)
-        self.spin_cx.setValue(640)
-        self.spin_cx.setDecimals(0)
-        self.spin_cx.setFixedWidth(70)
-        r3.addWidget(self.spin_cx)
-        r3.addWidget(QLabel("cy:"))
-        self.spin_cy = QDoubleSpinBox()
-        self.spin_cy.setRange(0, 2000)
-        self.spin_cy.setValue(480)
-        self.spin_cy.setDecimals(0)
-        self.spin_cy.setFixedWidth(70)
-        r3.addWidget(self.spin_cy)
-        l4.addLayout(r3)
+        l4.addWidget(self.spin_fx)
         lay.addWidget(g4)
-        
-        # === Radar ===
-        g_radar = QGroupBox("Radar")
-        l_radar = QVBoxLayout(g_radar)
-        l_radar.setSpacing(2)
-        r4 = QHBoxLayout()
-        r4.addWidget(QLabel("Yaw:"))
-        self.spin_yaw = QDoubleSpinBox()
-        self.spin_yaw.setRange(-1, 1)
-        self.spin_yaw.setValue(0)
-        self.spin_yaw.setSuffix(" rad")
-        self.spin_yaw.setDecimals(4)
-        self.spin_yaw.setFixedWidth(90)
-        r4.addWidget(self.spin_yaw)
-        l_radar.addLayout(r4)
-        r5 = QHBoxLayout()
-        r5.addWidget(QLabel("X:"))
-        self.spin_rx = QDoubleSpinBox()
-        self.spin_rx.setRange(0, 10)
-        self.spin_rx.setValue(3.5)
-        self.spin_rx.setSuffix(" m")
-        self.spin_rx.setDecimals(2)
-        self.spin_rx.setFixedWidth(90)
-        r5.addWidget(self.spin_rx)
-        l_radar.addLayout(r5)
-        r6 = QHBoxLayout()
-        r6.addWidget(QLabel("Y:"))
-        self.spin_ry = QDoubleSpinBox()
-        self.spin_ry.setRange(-5, 5)
-        self.spin_ry.setValue(0)
-        self.spin_ry.setSuffix(" m")
-        self.spin_ry.setDecimals(2)
-        self.spin_ry.setFixedWidth(90)
-        r6.addWidget(self.spin_ry)
-        l_radar.addLayout(r6)
-        lay.addWidget(g_radar)
         
         # === Actions ===
         g5 = QGroupBox("Actions")
@@ -240,10 +146,7 @@ class MainWindow(QMainWindow):
         self.btn_clear.setObjectName("ClearBtn")
         l5.addWidget(self.btn_clear)
         self.btn_save = QPushButton("💾 Save")
-        self.btn_pitch = QPushButton("🔧 Pitch")
-        self.btn_pitch.setToolTip("Compute pitch from lanes")
         l5.addWidget(self.btn_save)
-        l5.addWidget(self.btn_pitch)
         lay.addWidget(g5)
         
         # Stats
@@ -296,18 +199,6 @@ class MainWindow(QMainWindow):
         self.btn_undo.clicked.connect(self._onUndo)
         self.btn_clear.clicked.connect(self._onClear)
         self.btn_save.clicked.connect(self._onSave)
-        self.btn_pitch.clicked.connect(self._onComputePitch)
-        
-        # Parameter changes trigger BEV refresh
-        self.spin_h.valueChanged.connect(self._onParamChanged)
-        self.spin_fx.valueChanged.connect(self._onParamChanged)
-        self.spin_fy.valueChanged.connect(self._onParamChanged)
-        self.spin_cx.valueChanged.connect(self._onParamChanged)
-        self.spin_cy.valueChanged.connect(self._onParamChanged)
-        
-        self.spin_yaw.valueChanged.connect(self._onParamChanged)
-        self.spin_rx.valueChanged.connect(self._onParamChanged)
-        self.spin_ry.valueChanged.connect(self._onParamChanged)
         
         # Viewport interactions
         self.image_vp.radarClicked.connect(self._onRadarClicked)
@@ -405,40 +296,6 @@ class MainWindow(QMainWindow):
         
         self._updateModeUI()
     
-    def _refreshBEV(self):
-        """Refresh BEV display."""
-        # print("[DEBUG] _refreshBEV called")
-        if not self.calib_mgr:
-            return
-        
-        # Clear and rebuild
-        self.bev_vp.clearAll()
-        
-        # 1. Re-add radar points
-        if self.data_mgr.current_batch >= 0:
-            _, radar_data = self.data_mgr.get_batch(self.data_mgr.current_batch)
-            if radar_data:
-                for target in radar_data.get('targets', []):
-                    x_bev, y_bev = self.calib_mgr.radar_to_bev(target['x'], target['y'])
-                    self.bev_vp.addRadarBEVPoint(x_bev, y_bev, f"R{target.get('id')}")
-        
-        # 2. Re-add pair markers (Rings) - CRITICAL for user feedback
-        for i, pair in self.ops.get_pairs_for_batch(self.ops.current_batch):
-            # Recalculate BEV position based on potentially new parameters
-            radar_bev = self.calib_mgr.radar_to_bev(pair.radar_x, pair.radar_y)
-            self.bev_vp.addPairMarker(radar_bev[0], radar_bev[1], i)
-        
-        # 3. Re-add point pairs (comparison)
-        if self.calib_mgr.camera.pitch != 0:
-            for i, pair in self.ops.get_pairs_for_batch(self.ops.current_batch):
-                try:
-                    r_bev = self.calib_mgr.radar_to_bev(pair.radar_x, pair.radar_y)
-                    i_bev = self.calib_mgr.image_to_bev(pair.pixel_u, pair.pixel_v)
-                    if r_bev and i_bev:
-                        self.bev_vp.addComparisonPair(r_bev, i_bev, i)
-                except Exception as e:
-                    print(f"Error refreshing pair {i}: {e}")
-    
     def _projectRadar(self):
         """Project radar points onto image."""
         if not self.calibration.loaded:
@@ -476,66 +333,6 @@ class MainWindow(QMainWindow):
     # =========================================================================
     # Mode Management
     # =========================================================================
-    def _onComputePitch(self):
-        """Compute pitch from lane lines."""
-        print("[DEBUG] _onComputePitch called")
-        if not self.calib_mgr:
-            self.statusbar.showMessage("No calibration manager")
-            return
-        
-        if self.ops.num_lanes < 2:
-            self.statusbar.showMessage("Need at least 2 lane lines")
-            return
-        
-        try:
-            pitch = self.calib_mgr.compute_pitch_from_lanes(self.ops.lanes)
-            if pitch:
-                import numpy as np
-                self.lbl_pitch.setText(f"{pitch:.4f}")
-                self.lbl_pitch.setStyleSheet("color: #0f0; font-family: monospace; font-weight: bold;")
-                self.statusbar.showMessage(f"✅ Pitch: {pitch:.4f} rad ({np.degrees(pitch):.2f}°)")
-                print(f"[DEBUG] Pitch computed: {pitch}")
-                self._refreshBEV()
-            else:
-                self.statusbar.showMessage("❌ Failed to compute pitch")
-        except Exception as e:
-            print(f"[DEBUG] Pitch error: {e}")
-            self.statusbar.showMessage(f"Error: {e}")
-    
-    def _onParamChanged(self):
-        """Handle parameter changes - update and refresh BEV."""
-        # print("[PARAM] _onParamChanged called")
-        if not self.calib_mgr:
-            return
-        
-        # Update camera params (preserve pitch!)
-        self.calib_mgr.update_camera_params(
-            height=self.spin_h.value(),
-            fx=self.spin_fx.value(),
-            fy=self.spin_fy.value(),
-            cx=self.spin_cx.value(),
-            cy=self.spin_cy.value()
-        )
-        
-        # Update radar params
-        self.calib_mgr.update_radar_params(
-            yaw=self.spin_yaw.value(),
-            x_offset=self.spin_rx.value(),
-            y_offset=self.spin_ry.value()
-        )
-        
-        # Refresh Image Projection (green dots)
-        self._projectRadar()
-        
-        # Restore pending highlight if exists (needs to find new projected pos)
-        if self.ops.pending_radar:
-             # Find the marker for this target and re-highlight
-             # _projectRadar clears markers, so we grab the new one
-             self.image_vp.highlightPendingRadar(self.ops.pending_radar.target)
-
-        # Refresh BEV
-        self._refreshBEV()
-    
     def _onModeSwitch(self):
         self.ops.cancel()
         self.image_vp.clearPreview()
@@ -608,22 +405,6 @@ class MainWindow(QMainWindow):
         """Image point clicked."""
         if self.ops.mode != AppMode.SELECT_IMAGE:
             return
-
-        # Boundary Check
-        pix_width = 0
-        pix_height = 0
-        if self.image_vp._pixmap_item:
-            pix = self.image_vp._pixmap_item.pixmap()
-            if pix:
-                pix_width = pix.width()
-                pix_height = pix.height()
-        
-        # Default to 1280x720 if not loaded, or skip check? 
-        # Safer to skip check if pixmap not loaded, but typically it is.
-        if pix_width > 0 and pix_height > 0:
-            if not (0 <= u < pix_width and 0 <= v < pix_height):
-                self.statusbar.showMessage("❌ Clicked outside image bounds")
-                return
         
         pair = self.ops.select_image_point(u, v)
         if pair:
@@ -637,16 +418,6 @@ class MainWindow(QMainWindow):
             self.image_vp.addPairMarker(pair.radar_u, pair.radar_v, idx, is_radar=True)
             self.image_vp.addPairMarker(pair.pixel_u, pair.pixel_v, idx, is_radar=False)
             self.bev_vp.addPairMarker(pair.radar_x, pair.radar_y, idx)
-            
-            # BEV Comparison Projection
-            if self.calib_mgr and self.calib_mgr.camera.pitch != 0:
-                try:
-                    r_bev = self.calib_mgr.radar_to_bev(pair.radar_x, pair.radar_y)
-                    i_bev = self.calib_mgr.image_to_bev(pair.pixel_u, pair.pixel_v)
-                    if r_bev and i_bev:
-                        self.bev_vp.addComparisonPair(r_bev, i_bev, idx)
-                except Exception as e:
-                    print(f"Error adding BEV pair: {e}")
             
             self.statusbar.showMessage(f"Pair {idx+1} created: R{pair.radar_id} ↔ ({u:.0f}, {v:.0f})")
             self._updateModeUI()
@@ -667,18 +438,6 @@ class MainWindow(QMainWindow):
             if lane:
                 self.image_vp.completeLane(x, y)
                 self.statusbar.showMessage(f"Lane {self.ops.num_lanes} completed")
-                
-                # Auto-compute pitch when 2+ lanes
-                if self.calib_mgr and self.ops.num_lanes >= 2:
-                    try:
-                        pitch = self.calib_mgr.compute_pitch_from_lanes(self.ops.lanes)
-                        if pitch:
-                            import numpy as np
-                            self.lbl_pitch.setText(f"{pitch:.4f}")
-                            self.lbl_pitch.setStyleSheet("color: #0f0; font-family: monospace; font-weight: bold;")
-                            self.statusbar.showMessage(f"✅ Pitch: {pitch:.4f} rad ({np.degrees(pitch):.2f}°)")
-                    except Exception as e:
-                        print(f"Auto-pitch error: {e}")
                 self._updateModeUI()
     
     # =========================================================================

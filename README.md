@@ -15,8 +15,10 @@ A PyQt6-based desktop application for calibrating radar-camera systems and annot
 
 ## 🎯 Features
 
-- **Radar-to-Image Projection**: Load calibration points to project radar targets onto camera images
-- **Point Pair Annotation**: Click radar points → click corresponding image points → create matched pairs
+- **Radar-to-Image Projection**: Real-time projection of radar targets onto camera images
+- **BEV Visualization**: Top-down Bird's Eye View with real-time radar/image comparison
+- **Point Pair Annotation**: Click radar points (magenta) → click image points (yellow) → create matched pairs
+- **Auto-Pitch Calculation**: Compute camera pitch automatically from lane lines or vanishing points
 - **Lane Line Drawing**: Draw lane lines with 2-point (start/end) mode
 - **Multi-Batch Support**: Navigate through synchronized image/radar frames
 - **Undo/Redo**: Undo last operation with one click

@@ -1,357 +1,413 @@
 #!/usr/bin/env python3
 """
-generate_dummy_data.py
+generate_dummy_data.py - Generate Synthetic Dataset for BEV Projection System
 
-Generates synthetic dataset for testing Radar-Camera Fusion calibration system.
-Creates images with simulated cars, corresponding radar JSON data, and calibration files.
+This script generates a synchronized dataset with:
+1. Simulated camera images with objects
+2. Radar JSON files with targets in radar coordinates
+3. Data sync file mapping images to radar
+4. Ground truth parameters for verification
 
-Author: AI Assistant
-Date: 2026-01-12
+Coordinate Systems:
+- BEV (Vehicle): X=forward, Y=left, origin at rear axle
+- Radar: X=forward, Y=left in radar frame, offset by radar_yaw and position
+- Camera: Projects BEV points to image using intrinsics + pitch + height
+
+Author: caiusy
+Date: 2026-01-13
 """
 
 import os
 import json
-import random
 import numpy as np
 import cv2
-
+from typing import List, Tuple
 
 # =============================================================================
 # Configuration
 # =============================================================================
 
-# Output directories
+# Output paths
 OUTPUT_DIR = "dataset"
 IMAGES_DIR = os.path.join(OUTPUT_DIR, "images")
 RADAR_DIR = os.path.join(OUTPUT_DIR, "radar")
 
 # Image parameters
 IMAGE_WIDTH = 1280
-IMAGE_HEIGHT = 720
+IMAGE_HEIGHT = 960
 
-# Radar simulation parameters (in meters)
-RADAR_X_RANGE = (10, 50)    # Distance range (front)
-RADAR_Y_RANGE = (-10, 10)   # Lateral range (left-right)
-OBJECTS_PER_FRAME = (3, 5)  # Random number of objects per frame
-NOISE_STD = 0.3             # Std deviation for radar noise (meters)
+# Camera parameters (ground truth)
+CAMERA_HEIGHT = 1.5      # meters above ground
+CAMERA_PITCH = 0.05      # radians (positive = looking down)
+CAMERA_FX = 1000.0       # focal length
+CAMERA_FY = 1000.0
+CAMERA_CX = 640.0        # principal point
+CAMERA_CY = 480.0
+CAMERA_X_OFFSET = 3.5    # camera position from rear axle (m)
 
-# Number of frames to generate
-NUM_BATCHES = 5
+# Radar parameters (ground truth)
+RADAR_YAW = 0.03         # radians (radar azimuth offset, positive = rotated left)
+RADAR_X_OFFSET = 3.5     # radar X position from rear axle (m)
+RADAR_Y_OFFSET = 0.0     # radar Y position from rear axle (m)
 
-# Car drawing parameters (pixels)
-CAR_WIDTH = 80
-CAR_HEIGHT = 50
-CAR_COLOR = (255, 255, 255)  # White
-CENTER_MARKER_COLOR = (0, 0, 255)  # Red (BGR)
-CENTER_MARKER_RADIUS = 5
+# Object parameters
+CAR_WIDTH_PX = 60        # car width in pixels
+CAR_HEIGHT_PX = 40       # car height in pixels
+CAR_COLOR = (220, 220, 220)  # light gray
+CENTER_MARKER_RADIUS = 4
+CENTER_MARKER_COLOR = (0, 0, 255)  # red
 
+# Lane parameters
+LANE_COLOR = (255, 255, 0)  # cyan
+LANE_WIDTH = 2
 
-# =============================================================================
-# Ground Truth Homography Matrix
-# =============================================================================
-# This matrix maps Radar coordinates (x, y) in meters to Image coordinates (u, v) in pixels.
-# 
-# Radar coordinate system:
-#   - x: forward distance (positive = ahead)
-#   - y: lateral distance (positive = right)
-#
-# Image coordinate system:
-#   - u: horizontal pixel (0 = left, 1280 = right)
-#   - v: vertical pixel (0 = top, 720 = bottom)
-#
-# The homography is designed so that:
-#   - Objects further away (large x) appear higher in the image (smaller v)
-#   - Objects to the right (positive y) appear on the right side of the image (larger u)
-#   - Image center (~640, ~500) corresponds roughly to (30m, 0m) on ground
-
-H_GROUND_TRUTH = np.array([
-    [  0.0,   20.0,  640.0],   # u = 20*y + 640 (lateral mapping)
-    [-12.0,    0.0,  860.0],   # v = -12*x + 860 (depth mapping, inverted)
-    [  0.0,    0.0,    1.0]    # homogeneous coordinate
-], dtype=np.float64)
-
+# Number of frames
+NUM_FRAMES = 5
 
 # =============================================================================
-# Helper Functions
+# Coordinate Transforms
 # =============================================================================
 
-def create_directories():
-    """Create output directory structure."""
-    os.makedirs(IMAGES_DIR, exist_ok=True)
-    os.makedirs(RADAR_DIR, exist_ok=True)
-    print(f"[INFO] Created directories:")
-    print(f"       - {IMAGES_DIR}")
-    print(f"       - {RADAR_DIR}")
-
-
-def radar_to_image(radar_x: float, radar_y: float, H: np.ndarray) -> tuple:
+def bev_to_radar(x_bev: float, y_bev: float) -> Tuple[float, float]:
     """
-    Project radar coordinates to image coordinates using homography matrix.
-    
-    Args:
-        radar_x: Forward distance in meters
-        radar_y: Lateral distance in meters
-        H: 3x3 Homography matrix
-        
-    Returns:
-        (u, v): Pixel coordinates in image
+    Transform BEV coordinates to radar coordinates.
+    Inverse of radar_to_bev.
     """
-    # Homogeneous coordinates
-    radar_point = np.array([radar_x, radar_y, 1.0])
+    # Remove radar position offset
+    x_rel = x_bev - RADAR_X_OFFSET
+    y_rel = y_bev - RADAR_Y_OFFSET
     
-    # Apply homography
-    img_point = H @ radar_point
+    # Apply inverse yaw rotation (rotate by -radar_yaw)
+    cos_yaw = np.cos(-RADAR_YAW)
+    sin_yaw = np.sin(-RADAR_YAW)
     
-    # Normalize by homogeneous coordinate
-    u = img_point[0] / img_point[2]
-    v = img_point[1] / img_point[2]
+    x_radar = x_rel * cos_yaw - y_rel * sin_yaw
+    y_radar = x_rel * sin_yaw + y_rel * cos_yaw
+    
+    return (x_radar, y_radar)
+
+
+def radar_to_bev(x_radar: float, y_radar: float) -> Tuple[float, float]:
+    """Transform radar coordinates to BEV coordinates."""
+    cos_yaw = np.cos(RADAR_YAW)
+    sin_yaw = np.sin(RADAR_YAW)
+    
+    x_rot = x_radar * cos_yaw - y_radar * sin_yaw
+    y_rot = x_radar * sin_yaw + y_radar * cos_yaw
+    
+    x_bev = x_rot + RADAR_X_OFFSET
+    y_bev = y_rot + RADAR_Y_OFFSET
+    
+    return (x_bev, y_bev)
+
+
+def bev_to_image(x_bev: float, y_bev: float) -> Tuple[float, float]:
+    """
+    Project BEV coordinate to image pixel.
+    Assumes point is on ground plane (z=0).
+    """
+    # Vector from camera to point
+    cam_x = CAMERA_X_OFFSET
+    cam_z = CAMERA_HEIGHT
+    
+    dx = x_bev - cam_x
+    dy = y_bev  # lateral (left positive)
+    dz = -cam_z  # ground is below camera
+    
+    # Rotate by inverse pitch to get camera frame
+    cos_p = np.cos(-CAMERA_PITCH)
+    sin_p = np.sin(-CAMERA_PITCH)
+    
+    # Camera frame: Z forward, X right, Y down
+    # Vehicle frame: X forward, Y left, Z up
+    # Simplified: just apply pitch around Y axis
+    z_cam = dx * cos_p + dz * sin_p
+    y_cam = -dy  # flip for camera convention (right positive)
+    x_cam = -dx * sin_p + dz * cos_p
+    
+    # Actually let's use a simpler model:
+    # Camera looks forward, pitch rotates the view down
+    # Point in camera frame before pitch:
+    x_cam = dy   # lateral becomes horizontal
+    y_cam = -cam_z  # camera height
+    z_cam = dx   # forward distance
+    
+    # Apply pitch rotation (rotation around X axis)
+    cos_p = np.cos(CAMERA_PITCH)
+    sin_p = np.sin(CAMERA_PITCH)
+    
+    y_rot = y_cam * cos_p - z_cam * sin_p
+    z_rot = y_cam * sin_p + z_cam * cos_p
+    
+    if z_rot <= 0:
+        return None  # Behind camera
+    
+    # Project to image
+    u = CAMERA_FX * (x_cam / z_rot) + CAMERA_CX
+    v = CAMERA_FY * (y_rot / z_rot) + CAMERA_CY
     
     return (u, v)
 
 
-def generate_random_objects(num_objects: int) -> list:
+# =============================================================================
+# Data Generation
+# =============================================================================
+
+def generate_objects_in_bev(frame_id: int) -> List[dict]:
     """
-    Generate random car positions in radar coordinates.
+    Generate random objects in BEV coordinates.
+    Returns list of dicts with BEV coordinates.
+    """
+    np.random.seed(42 + frame_id)  # Reproducible
     
-    Args:
-        num_objects: Number of objects to generate
-        
-    Returns:
-        List of (x, y) tuples in meters
-    """
     objects = []
-    for _ in range(num_objects):
-        x = random.uniform(*RADAR_X_RANGE)
-        y = random.uniform(*RADAR_Y_RANGE)
-        objects.append((x, y))
+    n_objects = np.random.randint(3, 7)
+    
+    for i in range(n_objects):
+        # Random position in BEV (forward 10-50m, lateral -8 to +8m)
+        x_bev = np.random.uniform(10, 50)
+        y_bev = np.random.uniform(-8, 8)
+        
+        # Random velocity and properties
+        velocity = np.random.uniform(-5, 15)  # m/s
+        rcs = np.random.uniform(5, 25)  # dBsm
+        
+        objects.append({
+            'id': i,
+            'x_bev': x_bev,
+            'y_bev': y_bev,
+            'velocity': round(velocity, 2),
+            'rcs': round(rcs, 2)
+        })
+    
     return objects
 
 
-def add_radar_noise(objects: list, noise_std: float) -> list:
+def generate_lane_lines() -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
     """
-    Add Gaussian noise to simulate radar sensor noise.
+    Generate lane line endpoints in BEV coordinates.
+    Returns list of ((x1,y1), (x2,y2)) in BEV.
+    """
+    lanes = []
     
-    Args:
-        objects: List of (x, y) tuples
-        noise_std: Standard deviation of noise
-        
-    Returns:
-        List of (x, y) tuples with added noise
-    """
-    noisy_objects = []
-    for x, y in objects:
-        noisy_x = x + random.gauss(0, noise_std)
-        noisy_y = y + random.gauss(0, noise_std)
-        noisy_objects.append((noisy_x, noisy_y))
-    return noisy_objects
+    # Left lane line
+    lanes.append(((5, 3.5), (60, 3.5)))
+    # Right lane line  
+    lanes.append(((5, -3.5), (60, -3.5)))
+    # Center dashed line
+    lanes.append(((5, 0), (60, 0)))
+    
+    return lanes
 
 
-def create_radar_json(objects: list, filepath: str):
-    """
-    Save radar target data to JSON file.
-    
-    Args:
-        objects: List of (x, y) tuples (with noise)
-        filepath: Output JSON file path
-    """
-    targets = []
-    for i, (x, y) in enumerate(objects):
-        target = {
-            "id": i,
-            "x": round(x, 2),
-            "y": round(y, 2),
-            "range": round(np.sqrt(x**2 + y**2), 2),
-            "velocity": round(random.uniform(-5, 30), 2),  # Simulated velocity
-            "rcs": round(random.uniform(5, 25), 2)  # Radar cross section
-        }
-        targets.append(target)
-    
-    data = {"targets": targets}
-    
-    with open(filepath, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def create_image_with_cars(objects: list, H: np.ndarray, filepath: str):
-    """
-    Create an image with simulated cars drawn at projected positions.
-    
-    Args:
-        objects: List of (x, y) tuples in radar coordinates (ground truth, no noise)
-        H: Homography matrix
-        filepath: Output image file path
-    """
-    # Create blank black image
+def create_image(objects: List[dict], lanes: List, filepath: str):
+    """Create camera image with projected objects and lanes."""
     img = np.zeros((IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.uint8)
     
-    # Optional: Add some background texture (road-like gradient)
-    for row in range(IMAGE_HEIGHT):
-        gray_value = int(30 + (row / IMAGE_HEIGHT) * 40)  # Gradient from dark to slightly lighter
-        img[row, :] = (gray_value, gray_value, gray_value)
+    # Draw gradient sky
+    for y in range(IMAGE_HEIGHT // 2):
+        intensity = int(40 + (IMAGE_HEIGHT//2 - y) * 0.2)
+        img[y, :] = (intensity, intensity + 10, intensity + 20)
     
-    # Draw horizon line
-    horizon_y = 200
-    cv2.line(img, (0, horizon_y), (IMAGE_WIDTH, horizon_y), (60, 60, 80), 1)
+    # Draw ground
+    for y in range(IMAGE_HEIGHT // 2, IMAGE_HEIGHT):
+        intensity = int(60 - (y - IMAGE_HEIGHT//2) * 0.05)
+        img[y, :] = (intensity, intensity, intensity - 10)
     
-    # Draw each car
-    for x, y in objects:
-        # Project to image coordinates
-        u, v = radar_to_image(x, y, H)
-        u, v = int(round(u)), int(round(v))
+    # Draw lane lines (DISABLED - user will annotate manually)
+    # for (bev_start, bev_end) in lanes:
+    #     pt1 = bev_to_image(*bev_start)
+    #     pt2 = bev_to_image(*bev_end)
+    #     if pt1 and pt2:
+    #         pt1 = (int(pt1[0]), int(pt1[1]))
+    #         pt2 = (int(pt2[0]), int(pt2[1]))
+#             cv2.line(img, pt1, pt2, LANE_COLOR, LANE_WIDTH)
+
+    
+    # Draw objects (cars)
+    for obj in objects:
+        result = bev_to_image(obj['x_bev'], obj['y_bev'])
+        if result is None:
+            continue
+        u, v = result
         
-        # Skip if outside image bounds
+        # Check if in image bounds
         if not (0 <= u < IMAGE_WIDTH and 0 <= v < IMAGE_HEIGHT):
             continue
         
-        # Calculate car size based on distance (perspective effect)
-        scale = max(0.3, min(1.5, 30 / x))  # Closer = larger
-        car_w = int(CAR_WIDTH * scale)
-        car_h = int(CAR_HEIGHT * scale)
+        u, v = int(u), int(v)
         
-        # Draw white rectangle (car)
-        top_left = (u - car_w // 2, v - car_h // 2)
-        bottom_right = (u + car_w // 2, v + car_h // 2)
-        cv2.rectangle(img, top_left, bottom_right, CAR_COLOR, -1)  # Filled
-        cv2.rectangle(img, top_left, bottom_right, (180, 180, 180), 2)  # Border
+        # Scale car size based on distance (perspective)
+        distance = obj['x_bev']
+        scale = max(0.3, min(1.0, 30.0 / distance))
+        w = int(CAR_WIDTH_PX * scale)
+        h = int(CAR_HEIGHT_PX * scale)
         
-        # Draw red center marker for easy clicking
-        cv2.circle(img, (u, v), CENTER_MARKER_RADIUS, CENTER_MARKER_COLOR, -1)
+        # Draw car rectangle
+        top_left = (u - w // 2, v - h // 2)
+        bottom_right = (u + w // 2, v + h // 2)
+        cv2.rectangle(img, top_left, bottom_right, CAR_COLOR, -1)
+        cv2.rectangle(img, top_left, bottom_right, (100, 100, 100), 1)
         
-        # Draw distance label
-        label = f"{x:.1f}m"
-        cv2.putText(img, label, (u - 20, v - car_h // 2 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        # Draw center marker
+        cv2.circle(img, (u, v), int(CENTER_MARKER_RADIUS * scale + 2), CENTER_MARKER_COLOR, -1)
     
-    # Save image
     cv2.imwrite(filepath, img)
 
 
-def generate_calibration_points(H: np.ndarray, filepath: str):
-    """
-    Generate 4 fixed calibration points and save to file.
-    These points form a rectangle on the ground plane.
+def create_radar_json(objects: List[dict], filepath: str):
+    """Create radar JSON with targets in radar coordinates."""
+    targets = []
     
-    Args:
-        H: Homography matrix
-        filepath: Output text file path
-    """
-    # Define 4 calibration points in radar coordinates (forming a rectangle)
-    # These are chosen to be within the typical detection range
-    calibration_radar_points = [
-        (20.0, -5.0),   # Near-left
-        (20.0,  5.0),   # Near-right
-        (40.0, -5.0),   # Far-left
-        (40.0,  5.0),   # Far-right
-    ]
+    for obj in objects:
+        # Convert BEV to radar coordinates
+        x_radar, y_radar = bev_to_radar(obj['x_bev'], obj['y_bev'])
+        
+        # Calculate range and azimuth
+        range_m = np.sqrt(x_radar**2 + y_radar**2)
+        azimuth = np.arctan2(y_radar, x_radar)  # radians
+        
+        targets.append({
+            'id': obj['id'],
+            'x': round(x_radar, 3),
+            'y': round(y_radar, 3),
+            'range': round(range_m, 3),
+            'azimuth': round(azimuth, 4),
+            'velocity': obj['velocity'],
+            'rcs': obj['rcs']
+        })
     
-    with open(filepath, 'w', encoding='utf-8') as f:
-        f.write("# Calibration Points: radar_x radar_y img_u img_v\n")
-        f.write("# These 4 points can be loaded to compute Homography matrix\n")
-        for rx, ry in calibration_radar_points:
-            u, v = radar_to_image(rx, ry, H)
-            f.write(f"{rx:.2f} {ry:.2f} {u:.2f} {v:.2f}\n")
+    data = {
+        'frame_id': os.path.splitext(os.path.basename(filepath))[0],
+        'targets': targets,
+        'radar_params': {
+            'yaw': RADAR_YAW,
+            'x_offset': RADAR_X_OFFSET,
+            'y_offset': RADAR_Y_OFFSET
+        }
+    }
     
-    print(f"[INFO] Saved calibration points to: {filepath}")
-    print("       Points (radar_x, radar_y) -> (img_u, img_v):")
-    for rx, ry in calibration_radar_points:
-        u, v = radar_to_image(rx, ry, H)
-        print(f"         ({rx:.1f}, {ry:.1f}) -> ({u:.1f}, {v:.1f})")
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=2)
 
 
-def save_homography_matrix(H: np.ndarray, filepath: str):
-    """
-    Save the ground truth homography matrix for reference.
+def create_sync_json(num_frames: int, filepath: str):
+    """Create data synchronization JSON."""
+    entries = []
+    for i in range(num_frames):
+        entries.append({
+            'batch_id': i,
+            'image_path': f'images/{i:03d}.jpg',
+            'radar_json': f'radar/{i:03d}.json'
+        })
     
-    Args:
-        H: Homography matrix
-        filepath: Output text file path
-    """
-    with open(filepath, 'w', encoding='utf-8') as f:
-        f.write("# Ground Truth Homography Matrix (3x3)\n")
-        f.write("# Maps Radar (x, y) to Image (u, v)\n")
-        f.write("# Usage: [u, v, 1]^T = H @ [x, y, 1]^T (then normalize)\n")
-        for row in H:
-            f.write(" ".join(f"{val:12.4f}" for val in row) + "\n")
+    with open(filepath, 'w') as f:
+        json.dump(entries, f, indent=2)
+
+
+def create_ground_truth(filepath: str):
+    """Save ground truth parameters for verification."""
+    params = {
+        'camera': {
+            'height': CAMERA_HEIGHT,
+            'pitch': CAMERA_PITCH,
+            'fx': CAMERA_FX,
+            'fy': CAMERA_FY,
+            'cx': CAMERA_CX,
+            'cy': CAMERA_CY,
+            'x_offset': CAMERA_X_OFFSET
+        },
+        'radar': {
+            'yaw': RADAR_YAW,
+            'x_offset': RADAR_X_OFFSET,
+            'y_offset': RADAR_Y_OFFSET
+        },
+        'image': {
+            'width': IMAGE_WIDTH,
+            'height': IMAGE_HEIGHT
+        }
+    }
     
-    print(f"[INFO] Saved homography matrix to: {filepath}")
+    with open(filepath, 'w') as f:
+        json.dump(params, f, indent=2)
+
+
+def create_vanishing_lines(filepath: str):
+    """
+    Create a file with pre-defined parallel lines for vanishing point calibration.
+    These correspond to the lane lines in the image.
+    """
+    # Get lane line endpoints in image coordinates
+    lanes = generate_lane_lines()
+    lines = []
+    
+    for bev_start, bev_end in lanes:
+        pt1 = bev_to_image(*bev_start)
+        pt2 = bev_to_image(*bev_end)
+        if pt1 and pt2:
+            lines.append({
+                'x1': round(pt1[0], 1),
+                'y1': round(pt1[1], 1),
+                'x2': round(pt2[0], 1),
+                'y2': round(pt2[1], 1)
+            })
+    
+    data = {
+        'description': 'Pre-defined parallel lines for vanishing point calibration',
+        'lines': lines
+    }
+    
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=2)
 
 
 # =============================================================================
-# Main Generation Logic
+# Main
 # =============================================================================
 
 def main():
     print("=" * 60)
-    print("Radar-Camera Fusion Test Data Generator")
+    print("BEV Projection System - Dataset Generator")
     print("=" * 60)
     
     # Create directories
-    create_directories()
+    os.makedirs(IMAGES_DIR, exist_ok=True)
+    os.makedirs(RADAR_DIR, exist_ok=True)
     
-    # Data sync list
-    sync_data = []
+    # Generate frames
+    print(f"\nGenerating {NUM_FRAMES} frames...")
+    lanes = generate_lane_lines()
     
-    # Generate each batch/frame
-    print(f"\n[INFO] Generating {NUM_BATCHES} synthetic frames...")
-    
-    for batch_id in range(NUM_BATCHES):
-        print(f"\n--- Batch {batch_id} ---")
+    for i in range(NUM_FRAMES):
+        objects = generate_objects_in_bev(i)
         
-        # Generate random object positions (ground truth)
-        num_objects = random.randint(*OBJECTS_PER_FRAME)
-        gt_objects = generate_random_objects(num_objects)
-        print(f"  Objects: {num_objects}")
+        img_path = os.path.join(IMAGES_DIR, f"{i:03d}.jpg")
+        radar_path = os.path.join(RADAR_DIR, f"{i:03d}.json")
         
-        # Add noise for radar data
-        noisy_objects = add_radar_noise(gt_objects, NOISE_STD)
+        create_image(objects, lanes, img_path)
+        create_radar_json(objects, radar_path)
         
-        # Create file paths
-        img_filename = f"{batch_id:03d}.jpg"
-        radar_filename = f"{batch_id:03d}.json"
-        img_path = os.path.join(IMAGES_DIR, img_filename)
-        radar_path = os.path.join(RADAR_DIR, radar_filename)
-        
-        # Create radar JSON (with noisy data)
-        create_radar_json(noisy_objects, radar_path)
-        print(f"  Radar JSON: {radar_path}")
-        
-        # Create image (using ground truth positions for drawing)
-        create_image_with_cars(gt_objects, H_GROUND_TRUTH, img_path)
-        print(f"  Image: {img_path}")
-        
-        # Add to sync data (relative paths)
-        sync_data.append({
-            "batch_id": batch_id,
-            "image_path": f"images/{img_filename}",
-            "radar_json": f"radar/{radar_filename}"
-        })
+        print(f"  Frame {i}: {len(objects)} objects")
     
-    # Save data_sync.json
-    sync_filepath = os.path.join(OUTPUT_DIR, "data_sync.json")
-    with open(sync_filepath, 'w', encoding='utf-8') as f:
-        json.dump(sync_data, f, indent=2, ensure_ascii=False)
-    print(f"\n[INFO] Saved sync file to: {sync_filepath}")
+    # Create auxiliary files
+    create_sync_json(NUM_FRAMES, os.path.join(OUTPUT_DIR, "data_sync.json"))
+    create_ground_truth(os.path.join(OUTPUT_DIR, "ground_truth.json"))
+    create_vanishing_lines(os.path.join(OUTPUT_DIR, "vanishing_lines.json"))
     
-    # Generate calibration points
-    calib_filepath = os.path.join(OUTPUT_DIR, "calibration_points.txt")
-    generate_calibration_points(H_GROUND_TRUTH, calib_filepath)
+    print("\n" + "-" * 60)
+    print("Ground Truth Parameters:")
+    print(f"  Camera Height: {CAMERA_HEIGHT} m")
+    print(f"  Camera Pitch:  {CAMERA_PITCH:.4f} rad ({np.degrees(CAMERA_PITCH):.2f}°)")
+    print(f"  Camera FX:     {CAMERA_FX}")
+    print(f"  Radar Yaw:     {RADAR_YAW:.4f} rad ({np.degrees(RADAR_YAW):.2f}°)")
+    print("-" * 60)
     
-    # Save ground truth homography for reference
-    h_filepath = os.path.join(OUTPUT_DIR, "ground_truth_H.txt")
-    save_homography_matrix(H_GROUND_TRUTH, h_filepath)
-    
-    # Summary
-    print("\n" + "=" * 60)
-    print("Generation Complete!")
-    print("=" * 60)
-    print(f"\nOutput structure:")
-    print(f"  {OUTPUT_DIR}/")
-    print(f"  ├── images/           ({NUM_BATCHES} .jpg files)")
-    print(f"  ├── radar/            ({NUM_BATCHES} .json files)")
-    print(f"  ├── data_sync.json    (sync mapping)")
-    print(f"  ├── calibration_points.txt (4 point pairs for H matrix)")
-    print(f"  └── ground_truth_H.txt     (reference H matrix)")
-    print(f"\nYou can now use this dataset to test the calibration tool!")
+    print(f"\n✅ Dataset generated in '{OUTPUT_DIR}/'")
+    print(f"   - {NUM_FRAMES} images")
+    print(f"   - {NUM_FRAMES} radar JSON files")
+    print(f"   - data_sync.json")
+    print(f"   - ground_truth.json")
+    print(f"   - vanishing_lines.json")
 
 
 if __name__ == "__main__":

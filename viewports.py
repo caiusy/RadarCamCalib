@@ -441,7 +441,7 @@ class BEVViewport(ZoomPanView):
         
         self.x_range = (0, 60)    # Forward (m)
         self.y_range = (-15, 15)  # Lateral (m)
-        self.scale = 10           # px/m
+        self._scale_factor = 10           # px/m
         
         self._grid_items: List = []
         self._radar_items: List = []
@@ -497,12 +497,12 @@ class BEVViewport(ZoomPanView):
         
         # Scene rect
         margin = 30
-        w = (y1 - y0) * self.scale + 2 * margin
-        h = (x1 - x0) * self.scale + 2 * margin
-        self._scene.setSceneRect(y0 * self.scale - margin, -x1 * self.scale - margin, w, h)
+        w = (y1 - y0) * self._scale_factor + 2 * margin
+        h = (x1 - x0) * self._scale_factor + 2 * margin
+        self._scene.setSceneRect(y0 * self._scale_factor - margin, -x1 * self._scale_factor - margin, w, h)
     
     def _toScene(self, rx: float, ry: float) -> Tuple[float, float]:
-        return (ry * self.scale, -rx * self.scale)
+        return (ry * self._scale_factor, -rx * self._scale_factor)
     
     def clearRadar(self):
         for item in self._radar_items:
@@ -552,3 +552,66 @@ class BEVViewport(ZoomPanView):
         label.setPos(sx + 10, sy - 12)
         self._scene.addItem(label)
         self._pair_items.append(label)
+    
+    def addRadarBEVPoint(self, x_bev: float, y_bev: float, label: str, color: str = '#ff00ff'):
+        """Add a radar point in BEV coordinates (magenta circle)."""
+        try:
+            sx, sy = self._toScene(x_bev, y_bev)
+            size = 12
+            dot = QGraphicsEllipseItem(sx - size/2, sy - size/2, size, size)
+            dot.setPen(QPen(QColor(color), 2))
+            dot.setBrush(QBrush(QColor(color)))
+            self._scene.addItem(dot)
+            self._radar_items.append(dot)
+            text = QGraphicsTextItem(label)
+            text.setDefaultTextColor(QColor(color))
+            text.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+            text.setPos(sx + 10, sy - 10)
+            self._scene.addItem(text)
+            self._radar_items.append(text)
+        except Exception as e:
+            print(f"addRadarBEVPoint error: {e}")
+    
+    def addImageBEVPoint(self, x_bev: float, y_bev: float, label: str, color: str = '#ffff00'):
+        """Add an image point in BEV (yellow cross)."""
+        try:
+            sx, sy = self._toScene(x_bev, y_bev)
+            size = 10
+            line1 = QGraphicsLineItem(sx - size, sy, sx + size, sy)
+            line1.setPen(QPen(QColor(color), 3))
+            self._scene.addItem(line1)
+            self._pair_items.append(line1)
+            line2 = QGraphicsLineItem(sx, sy - size, sx, sy + size)
+            line2.setPen(QPen(QColor(color), 3))
+            self._scene.addItem(line2)
+            self._pair_items.append(line2)
+            text = QGraphicsTextItem(label)
+            text.setDefaultTextColor(QColor(color))
+            text.setFont(QFont("Arial", 10))
+            text.setPos(sx + 10, sy + 10)
+            self._scene.addItem(text)
+            self._pair_items.append(text)
+        except Exception as e:
+            print(f"addImageBEVPoint error: {e}")
+    
+    def addComparisonPair(self, radar_bev: tuple, image_bev: tuple, pair_index: int):
+        """Add comparison pair in BEV."""
+        try:
+            # Radar point overlap fix: Don't redraw radar point (it's already drawn in step 1/2)
+            # self.addRadarBEVPoint(radar_bev[0], radar_bev[1], f"R{pair_index+1}", '#ff00ff')
+            
+            self.addImageBEVPoint(image_bev[0], image_bev[1], f"I{pair_index+1}", '#ffff00')
+            sx1, sy1 = self._toScene(radar_bev[0], radar_bev[1])
+            sx2, sy2 = self._toScene(image_bev[0], image_bev[1])
+            line = QGraphicsLineItem(sx1, sy1, sx2, sy2)
+            pen = QPen(QColor('#ffffff'), 2, Qt.PenStyle.DashLine)
+            line.setPen(pen)
+            self._scene.addItem(line)
+            self._pair_items.append(line)
+        except Exception as e:
+            print(f"addComparisonPair error: {e}")
+    
+    def clearAll(self):
+        """Clear all BEV items."""
+        self.clearRadar()
+        self.clearPairs()
