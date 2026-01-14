@@ -8,7 +8,7 @@ A PyQt6-based desktop application for calibrating radar-camera systems and annot
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.0+-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-![Screenshot](assets/preview_v2.png)
+![Screenshot](assets/preview_v3.png)
 
 ---
 
