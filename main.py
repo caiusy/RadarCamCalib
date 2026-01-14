@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
 Radar-Camera Fusion Calibration System
+雷达-相机融合标定系统
 
 Main application window - integrates all modules.
+主应用程序窗口 - 集成所有模块。
 
-Modules:
-- config.py: Colors, styles, constants
-- backend.py: Data loading, calibration, export
-- viewports.py: Image and BEV viewport widgets
-- operations.py: Point pair and lane logic with undo
+Modules / 模块:
+- config.py: Colors, styles, constants (配置：颜色、样式、常量)
+- backend.py: Data loading, calibration, export (后台：数据加载、标定计算、导出)
+- viewports.py: Image and BEV viewport widgets (视图：图像和鸟瞰图窗口)
+- operations.py: Point pair and lane logic with undo (操作：点对和车道线逻辑，含撤销功能)
 
 Author: AI Assistant
 Date: 2026-01-13
@@ -16,6 +18,8 @@ Date: 2026-01-13
 
 import sys
 import os
+
+from datetime import datetime
 
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 
@@ -53,6 +57,7 @@ class MainWindow(QMainWindow):
         
         # Backend
         self.data_mgr = DataManager()
+        self.data_exporter = DataExporter()
         self.calibration = Calibration()
         
         # Operations
@@ -211,8 +216,8 @@ class MainWindow(QMainWindow):
         r5 = QHBoxLayout()
         r5.addWidget(QLabel("X:"))
         self.spin_rx = QDoubleSpinBox()
-        self.spin_rx.setRange(0, 10)
-        self.spin_rx.setValue(3.5)
+        self.spin_rx.setRange(-5, 5)
+        self.spin_rx.setValue(0.0)
         self.spin_rx.setSuffix(" m")
         self.spin_rx.setDecimals(2)
         self.spin_rx.setFixedWidth(90)
@@ -221,8 +226,8 @@ class MainWindow(QMainWindow):
         r6 = QHBoxLayout()
         r6.addWidget(QLabel("Y:"))
         self.spin_ry = QDoubleSpinBox()
-        self.spin_ry.setRange(-5, 5)
-        self.spin_ry.setValue(0)
+        self.spin_ry.setRange(0, 10)
+        self.spin_ry.setValue(3.5)
         self.spin_ry.setSuffix(" m")
         self.spin_ry.setDecimals(2)
         self.spin_ry.setFixedWidth(90)
@@ -244,6 +249,15 @@ class MainWindow(QMainWindow):
         self.btn_pitch.setToolTip("Compute pitch from lanes")
         l5.addWidget(self.btn_save)
         l5.addWidget(self.btn_pitch)
+        
+        self.btn_opt = QPushButton("✨ Optimize")
+        self.btn_opt.setToolTip("Optimize pitch using all collected point pairs")
+        l5.addWidget(self.btn_opt)
+        
+        self.btn_json = QPushButton("📄 JSON")
+        self.btn_json.setToolTip("Save Camera Params to JSON")
+        l5.addWidget(self.btn_json)
+        
         lay.addWidget(g5)
         
         # Stats
@@ -297,6 +311,8 @@ class MainWindow(QMainWindow):
         self.btn_clear.clicked.connect(self._onClear)
         self.btn_save.clicked.connect(self._onSave)
         self.btn_pitch.clicked.connect(self._onComputePitch)
+        self.btn_opt.clicked.connect(self._onOptimizePitch)
+        self.btn_json.clicked.connect(self._onSaveParams)
         
         # Parameter changes trigger BEV refresh
         self.spin_h.valueChanged.connect(self._onParamChanged)
@@ -383,9 +399,9 @@ class MainWindow(QMainWindow):
         if img_path:
             self.image_vp.loadImage(img_path)
         
-        # Load radar
+        # Load radar (using refresh for correct coordinates)
         if radar_data:
-            self.bev_vp.loadRadarData(radar_data)
+            self._refreshBEV()
         
         # Project radar to image
         self._projectRadar()
@@ -440,17 +456,38 @@ class MainWindow(QMainWindow):
                     print(f"Error refreshing pair {i}: {e}")
     
     def _projectRadar(self):
-        """Project radar points onto image."""
+        """
+        Project radar points onto image.
+        Requires calibration to be loaded first.
+        """
         if not self.calibration.loaded:
             return
-        
+            
+        if not self.calib_mgr:
+            return
+            
         self.image_vp.clearRadarMarkers()
-        radar_data = self.data_mgr.current_radar_data
+        
+        if self.data_mgr.current_batch < 0:
+            return
+            
+        _, radar_data = self.data_mgr.get_batch(self.data_mgr.current_batch)
+        if not radar_data:
+            return
         
         for t in radar_data.get('targets', []):
             rx, ry = t['x'], t['y']
-            u, v = self.calibration.project_radar_to_image(rx, ry)
-            self.image_vp.addRadarProjection(u, v, t)
+            
+            # Use Geometric Projection since we have corrected it
+            # This allows slider tuning.
+            # Ideally, self.calibration.loaded implies we have a base to work from.
+            x_bev, y_bev = self.calib_mgr.radar_to_bev(rx, ry)
+            result = self.calib_mgr.bev_to_image(x_bev, y_bev)
+            
+            if result:
+                u, v = result
+                if -2000 < u < 4000 and -2000 < v < 4000:
+                    self.image_vp.addRadarProjection(u, v, t)
     
     def _redrawPairs(self):
         """Redraw pair markers for current batch."""
@@ -463,7 +500,12 @@ class MainWindow(QMainWindow):
             # Image position marker
             self.image_vp.addPairMarker(pair.pixel_u, pair.pixel_v, i, is_radar=False)
             # BEV marker
-            self.bev_vp.addPairMarker(pair.radar_x, pair.radar_y, i)
+            if self.calib_mgr:
+                radar_bev = self.calib_mgr.radar_to_bev(pair.radar_x, pair.radar_y)
+                self.bev_vp.addPairMarker(radar_bev[0], radar_bev[1], i)
+            else:
+                # Fallback if no calib manager (shouldn't happen)
+                self.bev_vp.addPairMarker(pair.radar_x, pair.radar_y, i)
     
     def _redrawLanes(self):
         """Redraw lane markers for current batch."""
@@ -501,6 +543,72 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"[DEBUG] Pitch error: {e}")
             self.statusbar.showMessage(f"Error: {e}")
+
+    def _onOptimizePitch(self):
+        """Optimize pitch using all collected point pairs."""
+        if not self.calib_mgr:
+            return
+            
+        # Load all pairs
+        try:
+            pairs = self.data_mgr.load_all_point_pairs(self.data_mgr.data_root)
+            if not pairs:
+                QMessageBox.warning(self, "Warning", "No point pairs found in dataset folder!")
+                return
+                
+            n = len(pairs)
+            self.statusbar.showMessage(f"Optimizing pitch using {n} pairs...")
+            QApplication.processEvents() # Update UI
+            
+            new_pitch = self.calib_mgr.optimize_pitch(pairs, search_range=50)
+            
+            self.lbl_pitch.setText(f"{new_pitch:.4f}")
+            self.lbl_pitch.setStyleSheet("color: #0ff; font-family: monospace; font-weight: bold;")
+            self.statusbar.showMessage(f"✨ Optimized Pitch: {new_pitch:.4f} rad (from {n} pairs)")
+            
+            self._refreshBEV()
+            self._projectRadar()  # Refresh green dots on image
+            QMessageBox.information(self, "Success", f"Pitch optimized using {n} pairs.\nNew Pitch: {new_pitch:.5f}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+
+    def _onSaveParams(self):
+        """Save camera parameters to JSON."""
+        if not self.calib_mgr:
+            return
+            
+        try:
+            # Construct params dict
+            cam = self.calib_mgr.camera
+            radar = self.calib_mgr.radar
+            
+            params = {
+                "camera": {
+                    "height": cam.height,
+                    "pitch": cam.pitch,
+                    "fx": cam.fx,
+                    "fy": cam.fy,
+                    "cx": cam.cx,
+                    "cy": cam.cy
+                },
+                "radar": {
+                    "yaw": radar.yaw,
+                    "x_offset": radar.x_offset, # Transformed (Lateral)
+                    "y_offset": radar.y_offset  # Transformed (Forward)
+                },
+                "homography": {
+                    "radar_to_bev": self.calib_mgr.get_radar_bev_homography(),
+                    "camera_to_bev": self.calib_mgr.get_camera_bev_homography()
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            path = self.data_exporter.save_camera_params(params, self.data_mgr.data_root)
+            QMessageBox.information(self, "Saved", f"Parameters saved to:\n{os.path.basename(path)}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save params: {e}")
     
     def _onParamChanged(self):
         """Handle parameter changes - update and refresh BEV."""
@@ -525,7 +633,8 @@ class MainWindow(QMainWindow):
         )
         
         # Refresh Image Projection (green dots)
-        self._projectRadar()
+        # User requested to disable image projection update during param change
+        # self._projectRadar()
         
         # Restore pending highlight if exists (needs to find new projected pos)
         if self.ops.pending_radar:
@@ -535,11 +644,17 @@ class MainWindow(QMainWindow):
 
         # Refresh BEV
         self._refreshBEV()
+        
+        # Restore BEV highlight (since refresh clears it)
+        if self.ops.pending_radar:
+            self.bev_vp.highlightRadarMarker(self.ops.pending_radar.target)
+
     
     def _onModeSwitch(self):
         self.ops.cancel()
         self.image_vp.clearPreview()
         self.image_vp.clearPendingRadar()
+        self.bev_vp.clearPendingRadar()
         
         if self.radio_pair.isChecked():
             self.ops.start_pair_selection()
@@ -595,12 +710,23 @@ class MainWindow(QMainWindow):
         
         # Get projected position
         rx, ry = target['x'], target['y']
-        proj_u, proj_v = self.calibration.project_radar_to_image(rx, ry)
+        
+        # Use Geometric Projection if available
+        if self.calib_mgr:
+            x_bev, y_bev = self.calib_mgr.radar_to_bev(rx, ry)
+            res = self.calib_mgr.bev_to_image(x_bev, y_bev)
+            if res:
+                proj_u, proj_v = res
+            else:
+                proj_u, proj_v = 0, 0 # Should not happen if visible
+        else:
+            proj_u, proj_v = 0, 0
         
         # Record selection
         if self.ops.select_radar_point(target, proj_u, proj_v):
             # Highlight radar point as pending (yellow)
             self.image_vp.highlightPendingRadar(target)
+            self.bev_vp.highlightRadarMarker(target)
             self.statusbar.showMessage(f"Selected R{target.get('id')}. Now click corresponding image point.")
             self._updateModeUI()
     
@@ -631,12 +757,19 @@ class MainWindow(QMainWindow):
             
             # Clear pending highlight
             self.image_vp.clearPendingRadar()
+            self.bev_vp.clearPendingRadar()
             self.image_vp.clearPreview()
             
             # Draw completed pair markers
             self.image_vp.addPairMarker(pair.radar_u, pair.radar_v, idx, is_radar=True)
             self.image_vp.addPairMarker(pair.pixel_u, pair.pixel_v, idx, is_radar=False)
-            self.bev_vp.addPairMarker(pair.radar_x, pair.radar_y, idx)
+            
+            # Fix BEV projection (use transformed coordinates)
+            if self.calib_mgr:
+                r_bev_pt = self.calib_mgr.radar_to_bev(pair.radar_x, pair.radar_y)
+                self.bev_vp.addPairMarker(r_bev_pt[0], r_bev_pt[1], idx)
+            else:
+                self.bev_vp.addPairMarker(pair.radar_x, pair.radar_y, idx)
             
             # BEV Comparison Projection
             if self.calib_mgr and self.calib_mgr.camera.pitch != 0:

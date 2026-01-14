@@ -1,5 +1,6 @@
 """
 operations.py - Business logic for point pair selection, lane drawing, and undo/redo
+operations.py - 点对选择、车道线绘制和撤销/重做业务逻辑
 """
 
 from typing import List, Tuple, Optional, Dict
@@ -68,7 +69,9 @@ class PendingRadarSelection:
 class OperationsController:
     """
     Controls point pair selection and lane drawing logic.
+    控制点对选择和车道线绘制逻辑。
     Manages undo stack and mode transitions.
+    管理撤销栈和模式转换。
     """
     
     MAX_PAIRS = 10

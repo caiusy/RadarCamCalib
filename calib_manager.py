@@ -125,3 +125,18 @@ class CalibrationManager:
             self.update_camera_params(**gt_data['camera'])
         if 'radar' in gt_data:
             self.update_radar_params(**gt_data['radar'])
+
+    def optimize_pitch(self, pairs: List[dict], search_range: int = 50) -> float:
+        """Wrapper for optimize_pitch."""
+        new_pitch = self.transformer.optimize_pitch(pairs, search_range)
+        # Update camera pitch if optimized
+        self.camera.pitch = new_pitch
+        return new_pitch
+
+    def get_radar_bev_homography(self) -> List[List[float]]:
+        """Wrapper for get_radar_bev_homography."""
+        return self.transformer.get_radar_bev_homography()
+
+    def get_camera_bev_homography(self) -> Optional[List[List[float]]]:
+        """Wrapper for get_camera_bev_homography."""
+        return self.transformer.get_camera_bev_homography()

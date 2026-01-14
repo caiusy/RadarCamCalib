@@ -65,86 +65,78 @@ LANE_WIDTH = 2
 NUM_FRAMES = 5
 
 # =============================================================================
-# Coordinate Transforms
+# Coordinate Transforms (Y=Forward, X=Right)
 # =============================================================================
 
 def bev_to_radar(x_bev: float, y_bev: float) -> Tuple[float, float]:
     """
-    Transform BEV coordinates to radar coordinates.
-    Inverse of radar_to_bev.
+    Transform BEV (Y=Forward, X=Right) to Radar (X=Forward, Y=Left).
     """
-    # Remove radar position offset
-    x_rel = x_bev - RADAR_X_OFFSET
-    y_rel = y_bev - RADAR_Y_OFFSET
+    # Inverse mapping logic from calibration.py
+    # x_rot_fwd = y_bev - offset_x
+    # y_rot_left = offset_y - x_bev
     
-    # Apply inverse yaw rotation (rotate by -radar_yaw)
-    cos_yaw = np.cos(-RADAR_YAW)
-    sin_yaw = np.sin(-RADAR_YAW)
+    x_rot_fwd = y_bev - RADAR_X_OFFSET
+    y_rot_left = RADAR_Y_OFFSET - x_bev
     
-    x_radar = x_rel * cos_yaw - y_rel * sin_yaw
-    y_radar = x_rel * sin_yaw + y_rel * cos_yaw
+    cos_yaw = np.cos(RADAR_YAW)
+    sin_yaw = np.sin(RADAR_YAW)
+    
+    x_radar = x_rot_fwd * cos_yaw + y_rot_left * sin_yaw
+    y_radar = -x_rot_fwd * sin_yaw + y_rot_left * cos_yaw
     
     return (x_radar, y_radar)
 
 
 def radar_to_bev(x_radar: float, y_radar: float) -> Tuple[float, float]:
-    """Transform radar coordinates to BEV coordinates."""
+    """Transform Radar (X=Fwd, Y=Left) to BEV (Y=Fwd, X=Right)."""
     cos_yaw = np.cos(RADAR_YAW)
     sin_yaw = np.sin(RADAR_YAW)
     
-    x_rot = x_radar * cos_yaw - y_radar * sin_yaw
-    y_rot = x_radar * sin_yaw + y_radar * cos_yaw
+    x_rot_fwd = x_radar * cos_yaw - y_radar * sin_yaw
+    y_rot_left = x_radar * sin_yaw + y_radar * cos_yaw
     
-    x_bev = x_rot + RADAR_X_OFFSET
-    y_bev = y_rot + RADAR_Y_OFFSET
+    y_bev = x_rot_fwd + RADAR_X_OFFSET
+    x_bev = -y_rot_left + RADAR_Y_OFFSET
     
     return (x_bev, y_bev)
 
 
 def bev_to_image(x_bev: float, y_bev: float) -> Tuple[float, float]:
     """
-    Project BEV coordinate to image pixel.
-    Assumes point is on ground plane (z=0).
+    Project BEV (X=Right, Y=Forward) to image pixel.
     """
-    # Vector from camera to point
-    cam_x = CAMERA_X_OFFSET
-    cam_z = CAMERA_HEIGHT
+    cam_y_pos = CAMERA_X_OFFSET # Forward offset (3.5m)
+    cam_x_pos = 0.0             # Lateral offset
+    cam_z_pos = CAMERA_HEIGHT
     
-    dx = x_bev - cam_x
-    dy = y_bev  # lateral (left positive)
-    dz = -cam_z  # ground is below camera
+    # 1. Relative Vector in Vehicle Frame
+    dx_v = x_bev - cam_x_pos
+    dy_v = y_bev - cam_y_pos
+    dz_v = 0.0 - cam_z_pos
     
-    # Rotate by inverse pitch to get camera frame
-    cos_p = np.cos(-CAMERA_PITCH)
-    sin_p = np.sin(-CAMERA_PITCH)
+    # 2. Map to Camera Frame (Unrotated)
+    # Veh: X=Right, Y=Forward, Z=Up
+    # Cam: X=Right, Y=Down, Z=Forward
     
-    # Camera frame: Z forward, X right, Y down
-    # Vehicle frame: X forward, Y left, Z up
-    # Simplified: just apply pitch around Y axis
-    z_cam = dx * cos_p + dz * sin_p
-    y_cam = -dy  # flip for camera convention (right positive)
-    x_cam = -dx * sin_p + dz * cos_p
+    cx0 = dx_v      # Cam X = Veh X
+    cy0 = -dz_v     # Cam Y = -Veh Z
+    cz0 = dy_v      # Cam Z = Veh Y
     
-    # Actually let's use a simpler model:
-    # Camera looks forward, pitch rotates the view down
-    # Point in camera frame before pitch:
-    x_cam = dy   # lateral becomes horizontal
-    y_cam = -cam_z  # camera height
-    z_cam = dx   # forward distance
-    
-    # Apply pitch rotation (rotation around X axis)
+    # 3. Apply Pitch Rotation
     cos_p = np.cos(CAMERA_PITCH)
     sin_p = np.sin(CAMERA_PITCH)
     
-    y_rot = y_cam * cos_p - z_cam * sin_p
-    z_rot = y_cam * sin_p + z_cam * cos_p
+    x_cam = cx0
+    y_cam = cy0 * cos_p - cz0 * sin_p
+    z_cam = cy0 * sin_p + cz0 * cos_p
     
-    if z_rot <= 0:
-        return None  # Behind camera
+    if z_cam <= 0.1:
+        return None
     
-    # Project to image
-    u = CAMERA_FX * (x_cam / z_rot) + CAMERA_CX
-    v = CAMERA_FY * (y_rot / z_rot) + CAMERA_CY
+    # 4. Project
+    u = CAMERA_FX * (x_cam / z_cam) + CAMERA_CX
+    v = CAMERA_FY * (y_cam / z_cam) + CAMERA_CY
     
     return (u, v)
 
@@ -155,22 +147,20 @@ def bev_to_image(x_bev: float, y_bev: float) -> Tuple[float, float]:
 
 def generate_objects_in_bev(frame_id: int) -> List[dict]:
     """
-    Generate random objects in BEV coordinates.
-    Returns list of dicts with BEV coordinates.
+    Generate random objects in BEV coordinates (Y=Forward).
     """
-    np.random.seed(42 + frame_id)  # Reproducible
+    np.random.seed(42 + frame_id)
     
     objects = []
-    n_objects = np.random.randint(3, 7)
+    n_objects = np.random.randint(5, 12) # More objects for larger range
     
     for i in range(n_objects):
-        # Random position in BEV (forward 10-50m, lateral -8 to +8m)
-        x_bev = np.random.uniform(10, 50)
-        y_bev = np.random.uniform(-8, 8)
+        # Random position in BEV (Y=Forward 10-150m, X=Lateral -10 to +10m)
+        y_bev = np.random.uniform(10, 150)
+        x_bev = np.random.uniform(-10, 10)
         
-        # Random velocity and properties
-        velocity = np.random.uniform(-5, 15)  # m/s
-        rcs = np.random.uniform(5, 25)  # dBsm
+        velocity = np.random.uniform(-5, 25)
+        rcs = np.random.uniform(5, 30)
         
         objects.append({
             'id': i,
@@ -185,17 +175,16 @@ def generate_objects_in_bev(frame_id: int) -> List[dict]:
 
 def generate_lane_lines() -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
     """
-    Generate lane line endpoints in BEV coordinates.
-    Returns list of ((x1,y1), (x2,y2)) in BEV.
+    Generate lane line endpoints in BEV coordinates (Y=Forward).
     """
     lanes = []
     
-    # Left lane line
-    lanes.append(((5, 3.5), (60, 3.5)))
-    # Right lane line  
-    lanes.append(((5, -3.5), (60, -3.5)))
+    # Left lane line (X = -3.5m)
+    lanes.append(((-3.5, 5), (-3.5, 150)))
+    # Right lane line (X = 3.5m)
+    lanes.append(((3.5, 5), (3.5, 150)))
     # Center dashed line
-    lanes.append(((5, 0), (60, 0)))
+    lanes.append(((0, 5), (0, 150)))
     
     return lanes
 

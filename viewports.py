@@ -1,5 +1,6 @@
 """
 viewports.py - Custom QGraphicsView widgets for image and BEV display
+viewports.py - 用于图像和BEV显示的自定义QGraphicsView组件
 """
 
 from typing import Optional, List, Tuple, Dict
@@ -19,9 +20,9 @@ from config import COLORS, PAIR_COLORS, MARKER_SIZE_RADAR, MARKER_SIZE_IMAGE, MA
 class ZoomPanView(QGraphicsView):
     """
     Base graphics view with:
-    - Scroll wheel: zoom in/out
-    - Right-click + drag: pan canvas
-    - Left-click: point selection (when click mode enabled)
+    - Scroll wheel: zoom in/out (滚轮缩放)
+    - Right-click + drag: pan canvas (右键拖拽平移)
+    - Left-click: point selection (when click mode enabled) (左键点击选点)
     """
     
     clicked = pyqtSignal(float, float)
@@ -117,10 +118,11 @@ class ZoomPanView(QGraphicsView):
 class ImageViewport(ZoomPanView):
     """
     Viewport for displaying camera image with:
-    - Projected radar points (clickable)
-    - Point pair markers
-    - Lane lines
-    - Mouse tracking for preview
+    用于显示相机图像的视口，包含:
+    - Projected radar points (clickable) (投影的雷达点 - 可点击)
+    - Point pair markers (点对标记)
+    - Lane lines (车道线)
+    - Mouse tracking for preview (用于预览的鼠标跟踪)
     """
     
     radarClicked = pyqtSignal(dict)      # Clicked on a radar marker
@@ -432,16 +434,19 @@ class ImageViewport(ZoomPanView):
 
 
 class BEVViewport(ZoomPanView):
-    """Viewport for Bird's Eye View radar visualization."""
+    """Viewport for Bird's Eye View radar visualization. (雷达鸟瞰图可视化视口)"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         
-        self.x_range = (0, 60)    # Forward (m)
-        self.y_range = (-15, 15)  # Lateral (m)
-        self._scale_factor = 10           # px/m
+        # New Range Definition:
+        # X: Lateral (Right is positive)
+        # Y: Forward (Forward is positive)
+        self.x_range = (-20, 20)  # Lateral (m)
+        self.y_range = (0, 160)   # Forward (m)
+        self._scale_factor = 6    # px/m (Adjusted for larger range)
         
         self._grid_items: List = []
         self._radar_items: List = []
@@ -458,51 +463,75 @@ class BEVViewport(ZoomPanView):
         x0, x1 = self.x_range
         y0, y1 = self.y_range
         
-        # Grid lines (x is forward, y is lateral)
-        # Scene: x_scene = y_radar * scale, y_scene = -x_radar * scale
+        # Grid lines
+        # X lines (Forward lines, constant X)
         for x in range(x0, x1 + 1, 10):
-            sx0, sy = self._toScene(x, y0)
-            sx1, _ = self._toScene(x, y1)
-            color = '#444' if x % 20 == 0 else '#2a2a2a'
+            sx, sy0 = self._toScene(x, y0)
+            sx_end, sy1 = self._toScene(x, y1)
+            
+            color = '#444' if x == 0 else '#2a2a2a'
+            width = 2 if x == 0 else 1
+            
+            line = QGraphicsLineItem(sx, sy0, sx_end, sy1)
+            line.setPen(QPen(QColor(color), width))
+            self._scene.addItem(line)
+            self._grid_items.append(line)
+            
+            if x != 0:
+                label = QGraphicsTextItem(f"{x}m")
+                label.setDefaultTextColor(QColor('#555'))
+                label.setFont(QFont("Arial", 8))
+                label.setPos(sx + 2, sy0 - 20) # Pos at bottom
+                self._scene.addItem(label)
+                self._grid_items.append(label)
+
+        # Y lines (Lateral lines, constant Y)
+        for y in range(y0, y1 + 1, 20):
+            sx0, sy = self._toScene(x0, y)
+            sx1, sy_end = self._toScene(x1, y)
+            
+            color = '#444' if y % 40 == 0 else '#2a2a2a'
             line = QGraphicsLineItem(sx0, sy, sx1, sy)
             line.setPen(QPen(QColor(color), 1))
             self._scene.addItem(line)
             self._grid_items.append(line)
             
-            if x > 0:
-                label = QGraphicsTextItem(f"{x}m")
-                label.setDefaultTextColor(QColor('#555'))
-                label.setFont(QFont("Arial", 8))
-                label.setPos(sx1 + 5, sy - 8)
-                self._scene.addItem(label)
-                self._grid_items.append(label)
+            label = QGraphicsTextItem(f"{y}m")
+            label.setDefaultTextColor(QColor('#555'))
+            label.setFont(QFont("Arial", 8))
+            label.setPos(sx0 - 25, sy - 10)
+            self._scene.addItem(label)
+            self._grid_items.append(label)
         
-        for y in range(-10, 11, 10):
-            sx, sy0 = self._toScene(x0, y)
-            _, sy1 = self._toScene(x1, y)
-            color = '#666' if y == 0 else '#2a2a2a'
-            width = 2 if y == 0 else 1
-            line = QGraphicsLineItem(sx, sy0, sx, sy1)
-            line.setPen(QPen(QColor(color), width))
-            self._scene.addItem(line)
-            self._grid_items.append(line)
-        
-        # Ego vehicle
+        # Ego vehicle (Center bottom)
         from PyQt6.QtWidgets import QGraphicsRectItem
-        ego = QGraphicsRectItem(-8, -4, 16, 8)
+        # Vehicle is at (0, 0). Width=2m, Length=4m?
+        # Scene coords: (0,0) is center-bottom.
+        ego_w_px = 2.0 * self._scale_factor
+        ego_l_px = 4.0 * self._scale_factor
+        ego = QGraphicsRectItem(-ego_w_px/2, -ego_l_px, ego_w_px, ego_l_px) 
         ego.setPen(QPen(QColor(COLORS['accent']), 2))
         ego.setBrush(QBrush(QColor(COLORS['accent'])))
         self._scene.addItem(ego)
         self._grid_items.append(ego)
         
-        # Scene rect
-        margin = 30
-        w = (y1 - y0) * self._scale_factor + 2 * margin
-        h = (x1 - x0) * self._scale_factor + 2 * margin
-        self._scene.setSceneRect(y0 * self._scale_factor - margin, -x1 * self._scale_factor - margin, w, h)
+        # Scene rect updates
+        # Scene X: x0*s to x1*s. (-120 to 120)
+        # Scene Y: -y1*s to -y0*s. (-960 to 0)
+        margin = 50
+        w = (x1 - x0) * self._scale_factor + 2 * margin
+        h = (y1 - y0) * self._scale_factor + 2 * margin
+        # Top-Left of Rect
+        rect_x = x0 * self._scale_factor - margin
+        rect_y = -y1 * self._scale_factor - margin
+        self._scene.setSceneRect(rect_x, rect_y, w, h)
     
-    def _toScene(self, rx: float, ry: float) -> Tuple[float, float]:
-        return (ry * self._scale_factor, -rx * self._scale_factor)
+    def _toScene(self, x_bev: float, y_bev: float) -> Tuple[float, float]:
+        """
+        Convert BEV coordinates (X=Right, Y=Forward) to Scene coordinates.
+        Scene: X=Right, Y=Down.
+        """
+        return (x_bev * self._scale_factor, -y_bev * self._scale_factor)
     
     def clearRadar(self):
         for item in self._radar_items:
@@ -517,27 +546,62 @@ class BEVViewport(ZoomPanView):
         self._pair_items.clear()
     
     def loadRadarData(self, data: dict):
+        """
+        Load raw radar data.
+        Raw Data assumed: X=Forward, Y=Left.
+        Target BEV View: X=Right, Y=Forward.
+        """
         self.clearRadar()
         for t in data.get('targets', []):
-            rx, ry = t.get('x', 0), t.get('y', 0)
-            sx, sy = self._toScene(rx, ry)
+            rx_raw, ry_raw = t.get('x', 0), t.get('y', 0)
             
-            size = 10
+            # Convert raw (Forward, Left) to BEV (Right, Forward)
+            x_bev = -ry_raw
+            y_bev = rx_raw
+            
+            sx, sy = self._toScene(x_bev, y_bev)
+            
+            size = 8
             dot = QGraphicsEllipseItem(sx - size/2, sy - size/2, size, size)
             dot.setPen(QPen(QColor(COLORS['radar']), 1))
             dot.setBrush(QBrush(QColor(COLORS['radar'])))
+            # Store ID in data
+            dot.setData(0, t.get('id')) 
+            
             self._scene.addItem(dot)
             self._radar_items.append(dot)
             
             label = QGraphicsTextItem(f"#{t.get('id', '?')}")
             label.setDefaultTextColor(QColor(COLORS['radar']))
             label.setFont(QFont("Arial", 8))
-            label.setPos(sx + 8, sy - 8)
+            label.setPos(sx + 6, sy - 6)
             self._scene.addItem(label)
             self._radar_items.append(label)
+
+    def highlightRadarMarker(self, target: dict):
+        """Highlight a radar point by ID."""
+        tid = target.get('id')
+        for item in self._radar_items:
+            if isinstance(item, QGraphicsEllipseItem):
+                if item.data(0) == tid:
+                    item.setPen(QPen(QColor(COLORS['radar_pending']), 3))
+                    item.setBrush(QBrush(QColor(COLORS['radar_pending'])))
+
+    def clearPendingRadar(self):
+        """Reset radar highlights."""
+        for item in self._radar_items:
+            if isinstance(item, QGraphicsEllipseItem):
+                # Reset to normal
+                item.setPen(QPen(QColor(COLORS['radar']), 1))
+                item.setBrush(QBrush(QColor(COLORS['radar'])))
+
     
-    def addPairMarker(self, rx: float, ry: float, pair_index: int):
-        sx, sy = self._toScene(rx, ry)
+    def addPairMarker(self, radar_x_bev: float, radar_y_bev: float, pair_index: int):
+        """
+        Add marker for a pair. 
+        Args assumed to be already in BEV frame (X=Right, Y=Forward).
+        """
+        sx, sy = self._toScene(radar_x_bev, radar_y_bev)
         color = QColor(PAIR_COLORS[pair_index % len(PAIR_COLORS)])
         
         size = 18
@@ -554,21 +618,23 @@ class BEVViewport(ZoomPanView):
         self._pair_items.append(label)
     
     def addRadarBEVPoint(self, x_bev: float, y_bev: float, label: str, color: str = '#ff00ff'):
-        """Add a radar point in BEV coordinates (magenta circle)."""
+        """Add a radar point in BEV coordinates (X=Right, Y=Forward)."""
         try:
             sx, sy = self._toScene(x_bev, y_bev)
-            size = 12
+            size = 10
             dot = QGraphicsEllipseItem(sx - size/2, sy - size/2, size, size)
             dot.setPen(QPen(QColor(color), 2))
             dot.setBrush(QBrush(QColor(color)))
             self._scene.addItem(dot)
             self._radar_items.append(dot)
-            text = QGraphicsTextItem(label)
-            text.setDefaultTextColor(QColor(color))
-            text.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-            text.setPos(sx + 10, sy - 10)
-            self._scene.addItem(text)
-            self._radar_items.append(text)
+            
+            if label:
+                text = QGraphicsTextItem(label)
+                text.setDefaultTextColor(QColor(color))
+                text.setFont(QFont("Arial", 8))
+                text.setPos(sx + 6, sy - 6)
+                self._scene.addItem(text)
+                self._radar_items.append(text)
         except Exception as e:
             print(f"addRadarBEVPoint error: {e}")
     
@@ -576,42 +642,42 @@ class BEVViewport(ZoomPanView):
         """Add an image point in BEV (yellow cross)."""
         try:
             sx, sy = self._toScene(x_bev, y_bev)
-            size = 10
+            size = 8
             line1 = QGraphicsLineItem(sx - size, sy, sx + size, sy)
-            line1.setPen(QPen(QColor(color), 3))
+            line1.setPen(QPen(QColor(color), 2))
             self._scene.addItem(line1)
             self._pair_items.append(line1)
             line2 = QGraphicsLineItem(sx, sy - size, sx, sy + size)
-            line2.setPen(QPen(QColor(color), 3))
+            line2.setPen(QPen(QColor(color), 2))
             self._scene.addItem(line2)
             self._pair_items.append(line2)
-            text = QGraphicsTextItem(label)
-            text.setDefaultTextColor(QColor(color))
-            text.setFont(QFont("Arial", 10))
-            text.setPos(sx + 10, sy + 10)
-            self._scene.addItem(text)
-            self._pair_items.append(text)
+            
+            if label:
+                text = QGraphicsTextItem(label)
+                text.setDefaultTextColor(QColor(color))
+                text.setFont(QFont("Arial", 8))
+                text.setPos(sx + 8, sy + 8)
+                self._scene.addItem(text)
+                self._pair_items.append(text)
         except Exception as e:
             print(f"addImageBEVPoint error: {e}")
     
     def addComparisonPair(self, radar_bev: tuple, image_bev: tuple, pair_index: int):
         """Add comparison pair in BEV."""
         try:
-            # Radar point overlap fix: Don't redraw radar point (it's already drawn in step 1/2)
-            # self.addRadarBEVPoint(radar_bev[0], radar_bev[1], f"R{pair_index+1}", '#ff00ff')
+            self.addRadarBEVPoint(radar_bev[0], radar_bev[1], "", PAIR_COLORS[pair_index % len(PAIR_COLORS)])
+            self.addImageBEVPoint(image_bev[0], image_bev[1], "", "#FFFFFF")
             
-            self.addImageBEVPoint(image_bev[0], image_bev[1], f"I{pair_index+1}", '#ffff00')
+            # Draw line
             sx1, sy1 = self._toScene(radar_bev[0], radar_bev[1])
             sx2, sy2 = self._toScene(image_bev[0], image_bev[1])
             line = QGraphicsLineItem(sx1, sy1, sx2, sy2)
-            pen = QPen(QColor('#ffffff'), 2, Qt.PenStyle.DashLine)
-            line.setPen(pen)
+            line.setPen(QPen(QColor('#FFFFFF'), 1, Qt.PenStyle.DashLine))
             self._scene.addItem(line)
             self._pair_items.append(line)
         except Exception as e:
             print(f"addComparisonPair error: {e}")
     
     def clearAll(self):
-        """Clear all BEV items."""
-        self.clearRadar()
         self.clearPairs()
+        self.clearRadar()

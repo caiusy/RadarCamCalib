@@ -1,5 +1,6 @@
 """
 backend.py - Data loading, calibration computation, and file operations
+backend.py - 数据加载、标定计算及文件操作
 """
 
 import os
@@ -10,7 +11,7 @@ from datetime import datetime
 
 
 class DataManager:
-    """Manages data loading and file operations."""
+    """Manages data loading and file operations. (管理数据加载和文件操作)"""
     
     def __init__(self):
         self.data_root: str = ""
@@ -57,9 +58,39 @@ class DataManager:
     def num_batches(self) -> int:
         return len(self.sync_data)
 
+    def load_all_point_pairs(self, directory: str) -> List[dict]:
+        """Load all point_pairs_*.txt files from directory."""
+        all_pairs = []
+        if not os.path.exists(directory):
+            return []
+            
+        for fname in os.listdir(directory):
+            if fname.startswith("point_pairs_") and fname.endswith(".txt"):
+                path = os.path.join(directory, fname)
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            if line.startswith("#") or not line.strip():
+                                continue
+                            parts = [p.strip() for p in line.split(',')]
+                            if len(parts) >= 5:
+                                # Format: pixel_u, pixel_v, radar_id, radar_x, radar_y, ...
+                                pair = {
+                                    'pixel_u': float(parts[0]),
+                                    'pixel_v': float(parts[1]),
+                                    'radar_id': parts[2], # String or int
+                                    'radar_x': float(parts[3]),
+                                    'radar_y': float(parts[4]),
+                                    'batch': int(parts[-1]) if len(parts) > 8 else 0
+                                }
+                                all_pairs.append(pair)
+                except Exception as e:
+                    print(f"Error loading {fname}: {e}")
+        return all_pairs
+
 
 class Calibration:
-    """Handles calibration matrix computation and projection."""
+    """Handles calibration matrix computation and projection. (处理标定矩阵计算和投影)"""
     
     def __init__(self):
         self.H: Optional[np.ndarray] = None  # Radar -> Image homography
@@ -147,10 +178,51 @@ class DataExporter:
         path = os.path.join(directory, f"lane_{lane_id}_{ts}.txt")
         
         with open(path, 'w', encoding='utf-8') as f:
-            f.write("# Lane line: start_u, start_v, end_u, end_v\n")
-            if len(lane) >= 2:
-                f.write(f"{lane[0][0]:.2f}, {lane[0][1]:.2f}, {lane[1][0]:.2f}, {lane[1][1]:.2f}\n")
+            f.write("# x_bev, y_bev\n")
+            for pt in lane:
+                f.write(f"{pt[0]:.2f}, {pt[1]:.2f}\n")
         return path
+
+    @staticmethod
+    def save_camera_params(params: dict, directory: str) -> str:
+        """Save camera parameters to JSON file."""
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(directory, f"camera_params_{ts}.json")
+        
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(params, f, indent=4)
+        return path
+
+    @staticmethod
+    def load_all_point_pairs(self, directory: str) -> List[dict]:
+        """Deprecated: Use DataManager.load_all_point_pairs"""
+        return []
+        all_pairs = []
+        if not os.path.exists(directory):
+            return []
+            
+        for fname in os.listdir(directory):
+            if fname.startswith("point_pairs_") and fname.endswith(".txt"):
+                path = os.path.join(directory, fname)
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            if line.startswith("#") or not line.strip():
+                                continue
+                            parts = [p.strip() for p in line.split(',')]
+                            if len(parts) >= 5:
+                                # Format: pixel_u, pixel_v, radar_id, radar_x, radar_y, ...
+                                pair = {
+                                    'pixel_u': float(parts[0]),
+                                    'pixel_v': float(parts[1]),
+                                    'radar_id': parts[2], # String or int
+                                    'radar_x': float(parts[3]),
+                                    'radar_y': float(parts[4])
+                                }
+                                all_pairs.append(pair)
+                except Exception as e:
+                    print(f"Error loading {fname}: {e}")
+        return all_pairs
     
     @staticmethod
     def save_all_lanes(lanes: List[List[Tuple[float, float]]], directory: str) -> str:

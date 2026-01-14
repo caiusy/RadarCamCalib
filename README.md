@@ -12,6 +12,15 @@ A PyQt6-based desktop application for calibrating radar-camera systems and annot
 
 ---
 
+## 📅 Latest Updates (2026-01-15)
+
+- **Pitch Optimization**: Implemented global optimization algorithm to refine camera pitch using all collected point pairs (`Optimize` button).
+- **JSON Export**: Enhanced parameter saving to include full **Homography Matrices** (`radar_to_bev` and `camera_to_bev`) for direct coordinate mapping.
+- **Coordinate System**: Standardized to **Y-Axis Forward** (Vehicle Frame) for clearer BEV visualization and calibration.
+- **UI Improvements**: Added auto-refresh of pixel projections after optimization and fixed saving bugs.
+
+---
+
 
 ## 🎯 Features
 
@@ -22,6 +31,8 @@ A PyQt6-based desktop application for calibrating radar-camera systems and annot
 - **Lane Line Drawing**: Draw lane lines with 2-point (start/end) mode
 - **Multi-Batch Support**: Navigate through synchronized image/radar frames
 - **Undo/Redo**: Undo last operation with one click
+- **Pitch Optimization**: Global optimization of pitch using all collected point pairs
+- **Parameter Export**: Save intrinsics, extrinsics, and homography matrices to JSON
 - **Dark Engineering Theme**: Low eye-strain UI for long annotation sessions
 - **Zoom & Pan**: Scroll to zoom, right-click drag to pan canvas
 
@@ -98,6 +109,11 @@ python main.py
 
 1. Click **📂 Sync JSON** → Select `data_sync.json`
 2. Click **📐 Coarse TXT** → Select `calibration_points.txt`
+
+### 4. Optimize & Save
+1. Add point pairs across multiple frames.
+2. Click **✨ Optimize** to refine pitch globally.
+3. Click **📄 JSON** to save calibration results (including Homography matrices).
    - Status indicator turns **green ●** when loaded successfully
 
 ### 4. Annotate Point Pairs
