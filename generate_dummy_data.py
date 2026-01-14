@@ -1,413 +1,300 @@
-#!/usr/bin/env python3
 """
-generate_dummy_data.py - Generate Synthetic Dataset for BEV Projection System
+Generate dummy data for RadarCamCalib with corrected coordinate systems.
 
-This script generates a synchronized dataset with:
-1. Simulated camera images with objects
-2. Radar JSON files with targets in radar coordinates
-3. Data sync file mapping images to radar
-4. Ground truth parameters for verification
-
-Coordinate Systems:
-- BEV (Vehicle): X=forward, Y=left, origin at rear axle
-- Radar: X=forward, Y=left in radar frame, offset by radar_yaw and position
-- Camera: Projects BEV points to image using intrinsics + pitch + height
-
-Author: caiusy
-Date: 2026-01-13
+Coordinate System Definition:
+- Y-axis: Forward direction (0-180m)
+- X-axis: Lateral direction (-15 to 15m)
+- Z-axis: Height (typically vehicle height)
 """
 
-import os
-import json
 import numpy as np
+import json
+from pathlib import Path
+from typing import Dict, List, Tuple
 import cv2
-from typing import List, Tuple
-
-# =============================================================================
-# Configuration
-# =============================================================================
-
-# Output paths
-OUTPUT_DIR = "dataset"
-IMAGES_DIR = os.path.join(OUTPUT_DIR, "images")
-RADAR_DIR = os.path.join(OUTPUT_DIR, "radar")
-
-# Image parameters
-IMAGE_WIDTH = 1280
-IMAGE_HEIGHT = 960
-
-# Camera parameters (ground truth)
-CAMERA_HEIGHT = 1.5      # meters above ground
-CAMERA_PITCH = 0.05      # radians (positive = looking down)
-CAMERA_FX = 1000.0       # focal length
-CAMERA_FY = 1000.0
-CAMERA_CX = 640.0        # principal point
-CAMERA_CY = 480.0
-CAMERA_X_OFFSET = 3.5    # camera position from rear axle (m)
-
-# Radar parameters (ground truth)
-RADAR_YAW = 0.03         # radians (radar azimuth offset, positive = rotated left)
-RADAR_X_OFFSET = 3.5     # radar X position from rear axle (m)
-RADAR_Y_OFFSET = 0.0     # radar Y position from rear axle (m)
-
-# Object parameters
-CAR_WIDTH_PX = 60        # car width in pixels
-CAR_HEIGHT_PX = 40       # car height in pixels
-CAR_COLOR = (220, 220, 220)  # light gray
-CENTER_MARKER_RADIUS = 4
-CENTER_MARKER_COLOR = (0, 0, 255)  # red
-
-# Lane parameters
-LANE_COLOR = (255, 255, 0)  # cyan
-LANE_WIDTH = 2
-
-# Number of frames
-NUM_FRAMES = 5
-
-# =============================================================================
-# Coordinate Transforms
-# =============================================================================
-
-def bev_to_radar(x_bev: float, y_bev: float) -> Tuple[float, float]:
-    """
-    Transform BEV coordinates to radar coordinates.
-    Inverse of radar_to_bev.
-    """
-    # Remove radar position offset
-    x_rel = x_bev - RADAR_X_OFFSET
-    y_rel = y_bev - RADAR_Y_OFFSET
-    
-    # Apply inverse yaw rotation (rotate by -radar_yaw)
-    cos_yaw = np.cos(-RADAR_YAW)
-    sin_yaw = np.sin(-RADAR_YAW)
-    
-    x_radar = x_rel * cos_yaw - y_rel * sin_yaw
-    y_radar = x_rel * sin_yaw + y_rel * cos_yaw
-    
-    return (x_radar, y_radar)
 
 
-def radar_to_bev(x_radar: float, y_radar: float) -> Tuple[float, float]:
-    """Transform radar coordinates to BEV coordinates."""
-    cos_yaw = np.cos(RADAR_YAW)
-    sin_yaw = np.sin(RADAR_YAW)
+class DummyDataGenerator:
+    """Generate synthetic radar and camera data for calibration."""
     
-    x_rot = x_radar * cos_yaw - y_radar * sin_yaw
-    y_rot = x_radar * sin_yaw + y_radar * cos_yaw
-    
-    x_bev = x_rot + RADAR_X_OFFSET
-    y_bev = y_rot + RADAR_Y_OFFSET
-    
-    return (x_bev, y_bev)
-
-
-def bev_to_image(x_bev: float, y_bev: float) -> Tuple[float, float]:
-    """
-    Project BEV coordinate to image pixel.
-    Assumes point is on ground plane (z=0).
-    """
-    # Vector from camera to point
-    cam_x = CAMERA_X_OFFSET
-    cam_z = CAMERA_HEIGHT
-    
-    dx = x_bev - cam_x
-    dy = y_bev  # lateral (left positive)
-    dz = -cam_z  # ground is below camera
-    
-    # Rotate by inverse pitch to get camera frame
-    cos_p = np.cos(-CAMERA_PITCH)
-    sin_p = np.sin(-CAMERA_PITCH)
-    
-    # Camera frame: Z forward, X right, Y down
-    # Vehicle frame: X forward, Y left, Z up
-    # Simplified: just apply pitch around Y axis
-    z_cam = dx * cos_p + dz * sin_p
-    y_cam = -dy  # flip for camera convention (right positive)
-    x_cam = -dx * sin_p + dz * cos_p
-    
-    # Actually let's use a simpler model:
-    # Camera looks forward, pitch rotates the view down
-    # Point in camera frame before pitch:
-    x_cam = dy   # lateral becomes horizontal
-    y_cam = -cam_z  # camera height
-    z_cam = dx   # forward distance
-    
-    # Apply pitch rotation (rotation around X axis)
-    cos_p = np.cos(CAMERA_PITCH)
-    sin_p = np.sin(CAMERA_PITCH)
-    
-    y_rot = y_cam * cos_p - z_cam * sin_p
-    z_rot = y_cam * sin_p + z_cam * cos_p
-    
-    if z_rot <= 0:
-        return None  # Behind camera
-    
-    # Project to image
-    u = CAMERA_FX * (x_cam / z_rot) + CAMERA_CX
-    v = CAMERA_FY * (y_rot / z_rot) + CAMERA_CY
-    
-    return (u, v)
-
-
-# =============================================================================
-# Data Generation
-# =============================================================================
-
-def generate_objects_in_bev(frame_id: int) -> List[dict]:
-    """
-    Generate random objects in BEV coordinates.
-    Returns list of dicts with BEV coordinates.
-    """
-    np.random.seed(42 + frame_id)  # Reproducible
-    
-    objects = []
-    n_objects = np.random.randint(3, 7)
-    
-    for i in range(n_objects):
-        # Random position in BEV (forward 10-50m, lateral -8 to +8m)
-        x_bev = np.random.uniform(10, 50)
-        y_bev = np.random.uniform(-8, 8)
+    def __init__(self, output_dir: str = "./dummy_data"):
+        """
+        Initialize the dummy data generator.
         
-        # Random velocity and properties
-        velocity = np.random.uniform(-5, 15)  # m/s
-        rcs = np.random.uniform(5, 25)  # dBsm
+        Args:
+            output_dir: Output directory for generated data
+        """
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        objects.append({
-            'id': i,
-            'x_bev': x_bev,
-            'y_bev': y_bev,
-            'velocity': round(velocity, 2),
-            'rcs': round(rcs, 2)
-        })
-    
-    return objects
-
-
-def generate_lane_lines() -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
-    """
-    Generate lane line endpoints in BEV coordinates.
-    Returns list of ((x1,y1), (x2,y2)) in BEV.
-    """
-    lanes = []
-    
-    # Left lane line
-    lanes.append(((5, 3.5), (60, 3.5)))
-    # Right lane line  
-    lanes.append(((5, -3.5), (60, -3.5)))
-    # Center dashed line
-    lanes.append(((5, 0), (60, 0)))
-    
-    return lanes
-
-
-def create_image(objects: List[dict], lanes: List, filepath: str):
-    """Create camera image with projected objects and lanes."""
-    img = np.zeros((IMAGE_HEIGHT, IMAGE_WIDTH, 3), dtype=np.uint8)
-    
-    # Draw gradient sky
-    for y in range(IMAGE_HEIGHT // 2):
-        intensity = int(40 + (IMAGE_HEIGHT//2 - y) * 0.2)
-        img[y, :] = (intensity, intensity + 10, intensity + 20)
-    
-    # Draw ground
-    for y in range(IMAGE_HEIGHT // 2, IMAGE_HEIGHT):
-        intensity = int(60 - (y - IMAGE_HEIGHT//2) * 0.05)
-        img[y, :] = (intensity, intensity, intensity - 10)
-    
-    # Draw lane lines (DISABLED - user will annotate manually)
-    # for (bev_start, bev_end) in lanes:
-    #     pt1 = bev_to_image(*bev_start)
-    #     pt2 = bev_to_image(*bev_end)
-    #     if pt1 and pt2:
-    #         pt1 = (int(pt1[0]), int(pt1[1]))
-    #         pt2 = (int(pt2[0]), int(pt2[1]))
-#             cv2.line(img, pt1, pt2, LANE_COLOR, LANE_WIDTH)
-
-    
-    # Draw objects (cars)
-    for obj in objects:
-        result = bev_to_image(obj['x_bev'], obj['y_bev'])
-        if result is None:
-            continue
-        u, v = result
+        # Coordinate system parameters
+        self.y_range = (0, 180)  # Forward direction: 0-180m
+        self.x_range = (-15, 15)  # Lateral direction: -15 to 15m
+        self.z_range = (0, 3)    # Height: 0-3m
         
-        # Check if in image bounds
-        if not (0 <= u < IMAGE_WIDTH and 0 <= v < IMAGE_HEIGHT):
-            continue
+        # Camera parameters (example intrinsics)
+        self.focal_length = 500
+        self.image_width = 1280
+        self.image_height = 720
+        self.cx = self.image_width / 2
+        self.cy = self.image_height / 2
         
-        u, v = int(u), int(v)
+    def _transform_world_to_camera(
+        self, 
+        point_world: np.ndarray,
+        rotation_matrix: np.ndarray,
+        translation_vector: np.ndarray
+    ) -> np.ndarray:
+        """
+        Transform a point from world coordinates to camera coordinates.
         
-        # Scale car size based on distance (perspective)
-        distance = obj['x_bev']
-        scale = max(0.3, min(1.0, 30.0 / distance))
-        w = int(CAR_WIDTH_PX * scale)
-        h = int(CAR_HEIGHT_PX * scale)
-        
-        # Draw car rectangle
-        top_left = (u - w // 2, v - h // 2)
-        bottom_right = (u + w // 2, v + h // 2)
-        cv2.rectangle(img, top_left, bottom_right, CAR_COLOR, -1)
-        cv2.rectangle(img, top_left, bottom_right, (100, 100, 100), 1)
-        
-        # Draw center marker
-        cv2.circle(img, (u, v), int(CENTER_MARKER_RADIUS * scale + 2), CENTER_MARKER_COLOR, -1)
+        Args:
+            point_world: Point in world coordinates [x, y, z]
+            rotation_matrix: 3x3 rotation matrix (world to camera)
+            translation_vector: 3x1 translation vector (world to camera)
+            
+        Returns:
+            Point in camera coordinates [x_cam, y_cam, z_cam]
+        """
+        point_camera = rotation_matrix @ point_world + translation_vector
+        return point_camera
     
-    cv2.imwrite(filepath, img)
-
-
-def create_radar_json(objects: List[dict], filepath: str):
-    """Create radar JSON with targets in radar coordinates."""
-    targets = []
-    
-    for obj in objects:
-        # Convert BEV to radar coordinates
-        x_radar, y_radar = bev_to_radar(obj['x_bev'], obj['y_bev'])
+    def _transform_camera_to_image(
+        self,
+        point_camera: np.ndarray
+    ) -> Tuple[float, float]:
+        """
+        Transform a point from camera coordinates to image coordinates.
         
-        # Calculate range and azimuth
-        range_m = np.sqrt(x_radar**2 + y_radar**2)
-        azimuth = np.arctan2(y_radar, x_radar)  # radians
+        Args:
+            point_camera: Point in camera coordinates [x_cam, y_cam, z_cam]
+            
+        Returns:
+            Tuple of (u, v) image coordinates
+        """
+        if point_camera[2] <= 0:
+            return None  # Point is behind camera
         
-        targets.append({
-            'id': obj['id'],
-            'x': round(x_radar, 3),
-            'y': round(y_radar, 3),
-            'range': round(range_m, 3),
-            'azimuth': round(azimuth, 4),
-            'velocity': obj['velocity'],
-            'rcs': obj['rcs']
-        })
+        # Project using intrinsic matrix
+        u = self.focal_length * point_camera[0] / point_camera[2] + self.cx
+        v = self.focal_length * point_camera[1] / point_camera[2] + self.cy
+        
+        return (u, v)
     
-    data = {
-        'frame_id': os.path.splitext(os.path.basename(filepath))[0],
-        'targets': targets,
-        'radar_params': {
-            'yaw': RADAR_YAW,
-            'x_offset': RADAR_X_OFFSET,
-            'y_offset': RADAR_Y_OFFSET
+    def _transform_world_to_image(
+        self,
+        point_world: np.ndarray,
+        rotation_matrix: np.ndarray,
+        translation_vector: np.ndarray
+    ) -> Tuple[float, float]:
+        """
+        Transform a point from world coordinates directly to image coordinates.
+        
+        Args:
+            point_world: Point in world coordinates [x, y, z]
+            rotation_matrix: 3x3 rotation matrix (world to camera)
+            translation_vector: 3x1 translation vector (world to camera)
+            
+        Returns:
+            Tuple of (u, v) image coordinates, or None if out of view
+        """
+        # First transform to camera coordinates
+        point_camera = self._transform_world_to_camera(
+            point_world, rotation_matrix, translation_vector
+        )
+        
+        # Then transform to image coordinates
+        return self._transform_camera_to_image(point_camera)
+    
+    def generate_radar_detections(
+        self, 
+        num_detections: int = 50
+    ) -> List[Dict]:
+        """
+        Generate synthetic radar detections in world coordinates.
+        
+        Coordinate system:
+        - Y: Forward direction (0-180m)
+        - X: Lateral direction (-15 to 15m)
+        - Z: Height (0-3m)
+        
+        Args:
+            num_detections: Number of detections to generate
+            
+        Returns:
+            List of detection dictionaries with world coordinates
+        """
+        detections = []
+        
+        for i in range(num_detections):
+            # Generate random position in world coordinates
+            y = np.random.uniform(self.y_range[0], self.y_range[1])  # Forward
+            x = np.random.uniform(self.x_range[0], self.x_range[1])  # Lateral
+            z = np.random.uniform(self.z_range[0], self.z_range[1])  # Height
+            
+            detection = {
+                "id": i,
+                "position_world": {
+                    "x": float(x),  # Lateral: -15 to 15m
+                    "y": float(y),  # Forward: 0 to 180m
+                    "z": float(z)   # Height: 0 to 3m
+                },
+                "velocity": {
+                    "vx": float(np.random.uniform(-10, 10)),  # Lateral velocity
+                    "vy": float(np.random.uniform(-5, 30)),   # Forward velocity
+                    "vz": float(np.random.uniform(-1, 1))     # Vertical velocity
+                },
+                "rcs": float(np.random.uniform(0.1, 10.0))  # Radar cross section
+            }
+            detections.append(detection)
+        
+        return detections
+    
+    def generate_camera_detections(
+        self,
+        radar_detections: List[Dict],
+        rotation_matrix: np.ndarray = None,
+        translation_vector: np.ndarray = None
+    ) -> List[Dict]:
+        """
+        Project radar detections to camera image coordinates.
+        
+        Args:
+            radar_detections: List of radar detections in world coordinates
+            rotation_matrix: Rotation from world to camera (default: identity)
+            translation_vector: Translation from world to camera (default: zero)
+            
+        Returns:
+            List of detections with projected image coordinates
+        """
+        if rotation_matrix is None:
+            rotation_matrix = np.eye(3)
+        if translation_vector is None:
+            translation_vector = np.zeros((3, 1))
+        
+        camera_detections = []
+        
+        for detection in radar_detections:
+            pos = detection["position_world"]
+            point_world = np.array([[pos["x"]], [pos["y"]], [pos["z"]]])
+            
+            # Transform to image coordinates
+            image_coords = self._transform_world_to_image(
+                point_world, rotation_matrix, translation_vector
+            )
+            
+            if image_coords is not None:
+                u, v = image_coords
+                
+                # Check if point is within image bounds
+                if 0 <= u < self.image_width and 0 <= v < self.image_height:
+                    cam_detection = detection.copy()
+                    cam_detection["position_image"] = {
+                        "u": float(u),
+                        "v": float(v)
+                    }
+                    camera_detections.append(cam_detection)
+        
+        return camera_detections
+    
+    def _generate_calibration_transform(self) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Generate a realistic calibration transformation (world to camera).
+        
+        Assumes camera is mounted above the vehicle, looking slightly down and forward.
+        
+        Returns:
+            Tuple of (rotation_matrix, translation_vector)
+        """
+        # Camera is 1.5m forward, 0m lateral, 1.5m up from vehicle origin
+        translation = np.array([[0.0], [1.5], [1.5]])
+        
+        # Camera looks slightly down and forward
+        # Small pitch angle (camera looking down)
+        pitch = np.radians(-15)
+        rotation_pitch = np.array([
+            [1, 0, 0],
+            [0, np.cos(pitch), -np.sin(pitch)],
+            [0, np.sin(pitch), np.cos(pitch)]
+        ])
+        
+        # Small yaw angle (camera looking slightly right)
+        yaw = np.radians(0)
+        rotation_yaw = np.array([
+            [np.cos(yaw), 0, np.sin(yaw)],
+            [0, 1, 0],
+            [-np.sin(yaw), 0, np.cos(yaw)]
+        ])
+        
+        rotation = rotation_yaw @ rotation_pitch
+        
+        return rotation, translation
+    
+    def save_dummy_data(self, filename: str = "dummy_detections.json"):
+        """
+        Generate and save complete dummy dataset.
+        
+        Args:
+            filename: Output JSON filename
+        """
+        # Generate radar detections
+        radar_detections = self.generate_radar_detections(num_detections=50)
+        
+        # Generate calibration transform
+        rotation, translation = self._generate_calibration_transform()
+        
+        # Project to camera
+        camera_detections = self.generate_camera_detections(
+            radar_detections,
+            rotation_matrix=rotation,
+            translation_vector=translation
+        )
+        
+        # Prepare output data
+        output_data = {
+            "coordinate_system": {
+                "description": "World coordinates with corrected axes",
+                "x_axis": "Lateral direction: -15 to 15m",
+                "y_axis": "Forward direction: 0 to 180m",
+                "z_axis": "Height: 0 to 3m"
+            },
+            "calibration": {
+                "rotation_matrix": rotation.tolist(),
+                "translation_vector": translation.tolist(),
+                "camera_intrinsics": {
+                    "focal_length": self.focal_length,
+                    "cx": self.cx,
+                    "cy": self.cy,
+                    "image_width": self.image_width,
+                    "image_height": self.image_height
+                }
+            },
+            "radar_detections": radar_detections,
+            "camera_detections": camera_detections,
+            "statistics": {
+                "total_radar_detections": len(radar_detections),
+                "visible_in_camera": len(camera_detections),
+                "camera_coverage": f"{len(camera_detections) / len(radar_detections) * 100:.1f}%"
+            }
         }
-    }
-    
-    with open(filepath, 'w') as f:
-        json.dump(data, f, indent=2)
+        
+        # Save to JSON
+        output_path = self.output_dir / filename
+        with open(output_path, 'w') as f:
+            json.dump(output_data, f, indent=2)
+        
+        print(f"Dummy data saved to {output_path}")
+        print(f"Total radar detections: {len(radar_detections)}")
+        print(f"Visible in camera: {len(camera_detections)}")
+        print(f"Camera coverage: {len(camera_detections) / len(radar_detections) * 100:.1f}%")
+        
+        return output_path
 
-
-def create_sync_json(num_frames: int, filepath: str):
-    """Create data synchronization JSON."""
-    entries = []
-    for i in range(num_frames):
-        entries.append({
-            'batch_id': i,
-            'image_path': f'images/{i:03d}.jpg',
-            'radar_json': f'radar/{i:03d}.json'
-        })
-    
-    with open(filepath, 'w') as f:
-        json.dump(entries, f, indent=2)
-
-
-def create_ground_truth(filepath: str):
-    """Save ground truth parameters for verification."""
-    params = {
-        'camera': {
-            'height': CAMERA_HEIGHT,
-            'pitch': CAMERA_PITCH,
-            'fx': CAMERA_FX,
-            'fy': CAMERA_FY,
-            'cx': CAMERA_CX,
-            'cy': CAMERA_CY,
-            'x_offset': CAMERA_X_OFFSET
-        },
-        'radar': {
-            'yaw': RADAR_YAW,
-            'x_offset': RADAR_X_OFFSET,
-            'y_offset': RADAR_Y_OFFSET
-        },
-        'image': {
-            'width': IMAGE_WIDTH,
-            'height': IMAGE_HEIGHT
-        }
-    }
-    
-    with open(filepath, 'w') as f:
-        json.dump(params, f, indent=2)
-
-
-def create_vanishing_lines(filepath: str):
-    """
-    Create a file with pre-defined parallel lines for vanishing point calibration.
-    These correspond to the lane lines in the image.
-    """
-    # Get lane line endpoints in image coordinates
-    lanes = generate_lane_lines()
-    lines = []
-    
-    for bev_start, bev_end in lanes:
-        pt1 = bev_to_image(*bev_start)
-        pt2 = bev_to_image(*bev_end)
-        if pt1 and pt2:
-            lines.append({
-                'x1': round(pt1[0], 1),
-                'y1': round(pt1[1], 1),
-                'x2': round(pt2[0], 1),
-                'y2': round(pt2[1], 1)
-            })
-    
-    data = {
-        'description': 'Pre-defined parallel lines for vanishing point calibration',
-        'lines': lines
-    }
-    
-    with open(filepath, 'w') as f:
-        json.dump(data, f, indent=2)
-
-
-# =============================================================================
-# Main
-# =============================================================================
 
 def main():
-    print("=" * 60)
-    print("BEV Projection System - Dataset Generator")
-    print("=" * 60)
-    
-    # Create directories
-    os.makedirs(IMAGES_DIR, exist_ok=True)
-    os.makedirs(RADAR_DIR, exist_ok=True)
-    
-    # Generate frames
-    print(f"\nGenerating {NUM_FRAMES} frames...")
-    lanes = generate_lane_lines()
-    
-    for i in range(NUM_FRAMES):
-        objects = generate_objects_in_bev(i)
-        
-        img_path = os.path.join(IMAGES_DIR, f"{i:03d}.jpg")
-        radar_path = os.path.join(RADAR_DIR, f"{i:03d}.json")
-        
-        create_image(objects, lanes, img_path)
-        create_radar_json(objects, radar_path)
-        
-        print(f"  Frame {i}: {len(objects)} objects")
-    
-    # Create auxiliary files
-    create_sync_json(NUM_FRAMES, os.path.join(OUTPUT_DIR, "data_sync.json"))
-    create_ground_truth(os.path.join(OUTPUT_DIR, "ground_truth.json"))
-    create_vanishing_lines(os.path.join(OUTPUT_DIR, "vanishing_lines.json"))
-    
-    print("\n" + "-" * 60)
-    print("Ground Truth Parameters:")
-    print(f"  Camera Height: {CAMERA_HEIGHT} m")
-    print(f"  Camera Pitch:  {CAMERA_PITCH:.4f} rad ({np.degrees(CAMERA_PITCH):.2f}°)")
-    print(f"  Camera FX:     {CAMERA_FX}")
-    print(f"  Radar Yaw:     {RADAR_YAW:.4f} rad ({np.degrees(RADAR_YAW):.2f}°)")
-    print("-" * 60)
-    
-    print(f"\n✅ Dataset generated in '{OUTPUT_DIR}/'")
-    print(f"   - {NUM_FRAMES} images")
-    print(f"   - {NUM_FRAMES} radar JSON files")
-    print(f"   - data_sync.json")
-    print(f"   - ground_truth.json")
-    print(f"   - vanishing_lines.json")
+    """Generate and save dummy calibration data."""
+    generator = DummyDataGenerator(output_dir="./dummy_data")
+    generator.save_dummy_data()
 
 
 if __name__ == "__main__":
