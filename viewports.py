@@ -431,6 +431,79 @@ class ImageViewport(ZoomPanView):
         
         elif self._mode == 'lane_end':
             self.clicked.emit(x, y)
+    
+    # -------------------------------------------------------------------------
+    # Trajectory Projection (轨迹投影)
+    # -------------------------------------------------------------------------
+    
+    def showTrajectoryProjection(self, u: float, v: float, target_id: int):
+        """Show a highlighted trajectory projection point on image."""
+        self.clearTrajectoryProjection()
+        
+        size = 20
+        marker = QGraphicsEllipseItem(u - size/2, v - size/2, size, size)
+        marker.setPen(QPen(QColor('#FFFF00'), 4))
+        marker.setBrush(QBrush(QColor(255, 255, 0, 100)))
+        self._scene.addItem(marker)
+        
+        # Store for later removal
+        if not hasattr(self, '_trajectory_projection'):
+            self._trajectory_projection = []
+        self._trajectory_projection.append(marker)
+        
+        # Add label
+        label = QGraphicsTextItem(f"T{target_id}")
+        label.setDefaultTextColor(QColor('#FFFFFF'))
+        label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        label.setPos(u + 12, v - 12)
+        self._scene.addItem(label)
+        self._trajectory_projection.append(label)
+    
+    def clearTrajectoryProjection(self):
+        """Clear trajectory projection markers."""
+        if hasattr(self, '_trajectory_projection'):
+            for item in self._trajectory_projection:
+                if item.scene():
+                    self._scene.removeItem(item)
+            self._trajectory_projection.clear()
+    
+    def showCameraDetection(self, u: float, v: float, target_id: int):
+        """Show camera detection position (ground truth) as a square marker."""
+        size = 16
+        
+        # Square marker for camera detection (cyan/blue color)
+        from PyQt6.QtWidgets import QGraphicsRectItem
+        marker = QGraphicsRectItem(u - size/2, v - size/2, size, size)
+        marker.setPen(QPen(QColor('#00FFFF'), 3))
+        marker.setBrush(QBrush(QColor(0, 255, 255, 80)))
+        self._scene.addItem(marker)
+        
+        # Store for later removal
+        if not hasattr(self, '_trajectory_projection'):
+            self._trajectory_projection = []
+        self._trajectory_projection.append(marker)
+        
+        # Add label (offset from radar projection label)
+        label = QGraphicsTextItem(f"C{target_id}")
+        label.setDefaultTextColor(QColor('#00FFFF'))
+        label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        label.setPos(u + 12, v + 8)
+        self._scene.addItem(label)
+        self._trajectory_projection.append(label)
+
+    def drawConnectionLine(self, u_radar, v_radar, u_cam, v_cam, color=None):
+        """Draw a connecting line between radar and camera points."""
+        from PyQt6.QtWidgets import QGraphicsLineItem
+        
+        line = QGraphicsLineItem(u_radar, v_radar, u_cam, v_cam)
+        c = color if color else QColor('#FFFFFF')
+        pen = QPen(c, 2, Qt.PenStyle.DashLine)
+        line.setPen(pen)
+        self._scene.addItem(line)
+        
+        if not hasattr(self, '_trajectory_projection'):
+            self._trajectory_projection = []
+        self._trajectory_projection.append(line)
 
 
 class BEVViewport(ZoomPanView):
@@ -444,9 +517,9 @@ class BEVViewport(ZoomPanView):
         # New Range Definition:
         # X: Lateral (Right is positive)
         # Y: Forward (Forward is positive)
-        self.x_range = (-20, 20)  # Lateral (m)
-        self.y_range = (0, 160)   # Forward (m)
-        self._scale_factor = 6    # px/m (Adjusted for larger range)
+        self.x_range = (-30, 30)  # Lateral (m) - Extended
+        self.y_range = (0, 300)   # Forward (m) - Extended to 300m
+        self._scale_factor = 4    # px/m (Reduced for larger range)
         
         self._grid_items: List = []
         self._radar_items: List = []
@@ -681,3 +754,281 @@ class BEVViewport(ZoomPanView):
     def clearAll(self):
         self.clearPairs()
         self.clearRadar()
+    
+    # -------------------------------------------------------------------------
+    # Trajectory Visualization (轨迹可视化)
+    # -------------------------------------------------------------------------
+    
+    trajectoryPointClicked = pyqtSignal(int, int)  # (target_id, frame_id)
+    
+    def __init_trajectory_attrs(self):
+        """Initialize trajectory-related attributes (called from __init__)."""
+        if not hasattr(self, '_trajectory_items'):
+            self._trajectory_items: List = []
+            self._trajectory_mode = False
+    
+    def setTrajectoryMode(self, enabled: bool):
+        """Enable/disable trajectory viewing mode."""
+        self.__init_trajectory_attrs()
+        self._trajectory_mode = enabled
+        self.setClickMode(enabled)
+    
+    def clearTrajectories(self):
+        """Clear all trajectory graphics."""
+        self.__init_trajectory_attrs()
+        for item in self._trajectory_items:
+            if item.scene():
+                self._scene.removeItem(item)
+        self._trajectory_items.clear()
+    
+    def loadTrajectories(self, trajectories: Dict[int, List[Tuple[int, float, float]]]):
+        """
+        Load and render trajectories.
+        Args:
+            trajectories: Dict[target_id, List[(frame_id, x_radar, y_radar)]]
+        """
+        self.__init_trajectory_attrs()
+        self.clearTrajectories()
+        
+        from PyQt6.QtWidgets import QGraphicsPathItem
+        from PyQt6.QtGui import QPainterPath
+        
+        for i, (target_id, points) in enumerate(trajectories.items()):
+            if len(points) < 2:
+                continue
+                
+            color = QColor(PAIR_COLORS[i % len(PAIR_COLORS)])
+            
+            # Draw trajectory polyline
+            path = QPainterPath()
+            first = True
+            for frame_id, x_radar, y_radar in points:
+                # Convert raw radar (Forward, Left) to BEV (Right, Forward)
+                x_bev = -y_radar
+                y_bev = x_radar
+                sx, sy = self._toScene(x_bev, y_bev)
+                
+                if first:
+                    path.moveTo(sx, sy)
+                    first = False
+                else:
+                    path.lineTo(sx, sy)
+            
+            path_item = QGraphicsPathItem(path)
+            path_item.setPen(QPen(color, 2))
+            self._scene.addItem(path_item)
+            self._trajectory_items.append(path_item)
+            
+            # Draw points at each frame
+            for frame_id, x_radar, y_radar in points:
+                x_bev = -y_radar
+                y_bev = x_radar
+                sx, sy = self._toScene(x_bev, y_bev)
+                
+                size = 6
+                dot = QGraphicsEllipseItem(sx - size/2, sy - size/2, size, size)
+                dot.setPen(QPen(color, 1))
+                dot.setBrush(QBrush(color))
+                # Store target_id and frame_id for click detection
+                dot.setData(0, target_id)
+                dot.setData(1, frame_id)
+                self._scene.addItem(dot)
+                self._trajectory_items.append(dot)
+            
+            # Label at last point
+            if points:
+                last_frame, last_x, last_y = points[-1]
+                x_bev = -last_y
+                y_bev = last_x
+                sx, sy = self._toScene(x_bev, y_bev)
+                label = QGraphicsTextItem(f"T{target_id}")
+                label.setDefaultTextColor(color)
+                label.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+                label.setPos(sx + 8, sy - 8)
+                self._scene.addItem(label)
+                self._trajectory_items.append(label)
+    
+    def highlightTrajectoryPoint(self, target_id: int, frame_id: int):
+        """Highlight a specific point on the trajectory."""
+        pass # To be implemented if needed
+        
+    def clearTrails(self):
+        """Clear temporary trajectory trails."""
+        if hasattr(self, '_trail_items'):
+            for item in self._trail_items:
+                if item.scene():
+                    self._scene.removeItem(item)
+            self._trail_items.clear()
+
+    def drawTrajectoryTrail(self, points: List[Tuple[float, float]], color: QColor):
+        """Draw a trajectory trail (growing dots). Points are (x_radar, y_radar)."""
+        if not points:
+            return
+            
+        from PyQt6.QtWidgets import QGraphicsEllipseItem
+        
+        if not hasattr(self, '_trail_items'):
+             self._trail_items = []
+        
+        # Draw dots with gradient size and alpha
+        # Draw connected lines and dots
+        total = len(points)
+        prev_x, prev_y = None, None
+        
+        for i, (x_bev, y_bev) in enumerate(points):
+             if x_bev is None or y_bev is None:
+                 continue
+                 
+             # Assumes points are already in BEV coordinates
+             sx, sy = self._toScene(x_bev, y_bev)
+             
+             # Calculate ratio for gradient effects
+             ratio = (i / total) if total > 1 else 1.0
+             
+             # 1. Draw Line from previous point
+             if prev_x is not None and prev_y is not None:
+                 sx_prev, sy_prev = self._toScene(prev_x, prev_y)
+                 line = QGraphicsLineItem(sx_prev, sy_prev, sx, sy)
+                 # Fade line tail
+                 line_alpha = 50 + 150 * ratio
+                 c_line = QColor(color)
+                 c_line.setAlpha(int(line_alpha))
+                 line.setPen(QPen(c_line, 2))
+                 line.setZValue(39) # Below dots (40)
+                 self._scene.addItem(line)
+                 self._trail_items.append(line)
+             
+             prev_x, prev_y = x_bev, y_bev
+             
+             # 2. Draw Dot
+             # Size: 2.0 -> 6.0
+             size = 2.0 + 4.0 * (ratio ** 2) 
+             
+             # Alpha: 100 -> 255
+             alpha = 100 + 155 * ratio
+             c = QColor(color)
+             c.setAlpha(int(alpha))
+             
+             dot = QGraphicsEllipseItem(sx - size/2, sy - size/2, size, size)
+             dot.setPen(QPen(Qt.PenStyle.NoPen))
+             dot.setBrush(QBrush(c))
+             dot.setZValue(40) # Ensure trail is above map but below head
+             self._scene.addItem(dot)
+             self._trail_items.append(dot)
+    
+    def drawTrajectoryHead(self, x_radar: float, y_radar: float, color: QColor):
+        """Draw a highlighted head for the trajectory."""
+        try:
+            if x_radar is None or y_radar is None:
+                return
+            
+            # Cast to float for safety
+            x_radar = float(x_radar)
+            y_radar = float(y_radar)
+            
+            # Assumes points are already in BEV coordinates
+            x_bev = x_radar
+            y_bev = y_radar
+            sx, sy = self._toScene(x_bev, y_bev)
+            
+            size = 12 # Bigger than trail (max 8)
+            
+            # Glow effect
+            from PyQt6.QtWidgets import QGraphicsEllipseItem
+            glow = QGraphicsEllipseItem(sx - size/2 - 2, sy - size/2 - 2, size + 4, size + 4)
+            glow.setPen(QPen(QColor(color), 1))
+            glow.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+            glow.setZValue(50) # Ensure head is on top
+            self._scene.addItem(glow)
+            self._trail_items.append(glow)
+            self._trail_items.append(glow)
+            
+            # Solid core
+            head = QGraphicsEllipseItem(sx - size/2, sy - size/2, size, size)
+            head.setPen(QPen(QColor('#FFFFFF'), 2)) # White border
+            head.setBrush(QBrush(color))
+            self._scene.addItem(head)
+            self._trail_items.append(head)
+            
+        except Exception as e:
+            print(f"[ERROR] drawTrajectoryHead failed: {e}")
+
+    def loadCameraTrajectories(self, trajectories: Dict[int, List[Tuple[int, float, float, float, float]]]):
+        """
+        Load and render camera trajectories (in BEV space).
+        Args:
+            trajectories: Dict[target_id, List[(frame_id, u, v, x_bev, y_bev)]]
+        Camera trajectories are shown as dashed lines with square markers.
+        """
+        self.__init_trajectory_attrs()
+        
+        from PyQt6.QtWidgets import QGraphicsPathItem, QGraphicsRectItem
+        from PyQt6.QtGui import QPainterPath
+        
+        for i, (target_id, points) in enumerate(trajectories.items()):
+            if len(points) < 2:
+                continue
+                
+            color = QColor(PAIR_COLORS[i % len(PAIR_COLORS)])
+            lighter_color = QColor(color)
+            lighter_color.setAlpha(180)
+            
+            # Draw trajectory polyline (dashed for camera)
+            path = QPainterPath()
+            first = True
+            for frame_id, u, v, x_bev, y_bev in points:
+                sx, sy = self._toScene(x_bev, y_bev)
+                
+                if first:
+                    path.moveTo(sx, sy)
+                    first = False
+                else:
+                    path.lineTo(sx, sy)
+            
+            path_item = QGraphicsPathItem(path)
+            pen = QPen(lighter_color, 2, Qt.PenStyle.DashLine)
+            path_item.setPen(pen)
+            self._scene.addItem(path_item)
+            self._trajectory_items.append(path_item)
+            
+            # Draw square markers for camera points
+            for frame_id, u, v, x_bev, y_bev in points:
+                sx, sy = self._toScene(x_bev, y_bev)
+                
+                size = 5
+                rect = QGraphicsRectItem(sx - size/2, sy - size/2, size, size)
+                rect.setPen(QPen(lighter_color, 1))
+                rect.setBrush(QBrush(lighter_color))
+                rect.setData(0, target_id)
+                rect.setData(1, frame_id)
+                rect.setData(2, 'camera')  # Mark as camera point
+                self._scene.addItem(rect)
+                self._trajectory_items.append(rect)
+    
+    def mousePressEvent(self, event: QMouseEvent):
+        """Handle clicks on trajectory points."""
+        if hasattr(self, '_trajectory_mode') and self._trajectory_mode:
+            if event.button() == Qt.MouseButton.LeftButton:
+                pos = self.mapToScene(event.position().toPoint())
+                # Find nearest trajectory point
+                min_dist = float('inf')
+                nearest_target = None
+                nearest_frame = None
+                
+                for item in self._trajectory_items:
+                    if isinstance(item, QGraphicsEllipseItem):
+                        rect = item.rect()
+                        cx = rect.x() + rect.width() / 2
+                        cy = rect.y() + rect.height() / 2
+                        dist = ((cx - pos.x())**2 + (cy - pos.y())**2)**0.5
+                        if dist < min_dist and dist < 30:
+                            min_dist = dist
+                            nearest_target = item.data(0)
+                            nearest_frame = item.data(1)
+                
+                if nearest_target is not None and nearest_frame is not None:
+                    self.trajectoryPointClicked.emit(nearest_target, nearest_frame)
+                    return
+        
+        super().mousePressEvent(event)
+

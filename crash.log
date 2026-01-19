@@ -1,0 +1,16 @@
+[DEBUG] calib_mgr initialized: True
+[TrajectoryDB] Init with path: None
+[AUTO-LOAD] State loaded from DB. 0 points restored.
+qt.qpa.fonts: Populating font family aliases took 112 ms. Replace uses of missing font family "Sans-serif" with one that exists to avoid this cost. 
+2026-01-20 00:49:41.544 Python[15660:27424119] +[IMKClient subclass]: chose IMKClient_Modern
+2026-01-20 00:49:41.544 Python[15660:27424119] +[IMKInputSession subclass]: chose IMKInp[DEBUG] calib_mgr initialized: True
+[TrajectoryDB] Init with path: None
+[AUTO-LOAD] State loaded from DB. 0 points restored.
+[DB] Initializing database at /Users/caius/Downloads/radardemo/dataset/radar_data.db
+[TrajectoryDB] Init with path: /Users/caius/Downloads/radardemo/dataset/radar_data.db
+[TrajectoryDB] DB loaded status: True (rows: 47)
+[Operations] Restored 6 points from DB
+[AUTO-LOAD] State loaded from DB. 6 points restored.
+[TrajectoryDB] Loaded 47 radar points
+[DEBUG] _enterTrajectoryMode: Found 0 saved pairs in DB
+[DEBUG] TrajectoryDialog: Emitting pairSelected(3, 3)

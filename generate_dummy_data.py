@@ -280,6 +280,40 @@ def create_radar_json(objects: List[dict], filepath: str):
         json.dump(data, f, indent=2)
 
 
+def create_camera_json(objects: List[dict], filepath: str):
+    """Create camera detection JSON with targets in pixel coordinates."""
+    detections = []
+    
+    for obj in objects:
+        # Project BEV to image
+        result = bev_to_image(obj['x_bev'], obj['y_bev'])
+        if result is None:
+            continue
+        
+        u, v = result
+        
+        # Add some detection noise
+        u += np.random.uniform(-3, 3)
+        v += np.random.uniform(-3, 3)
+        
+        detections.append({
+            'id': obj['id'],
+            'u': round(u, 1),
+            'v': round(v, 1),
+            'x_bev': round(obj['x_bev'], 3),
+            'y_bev': round(obj['y_bev'], 3),
+            'confidence': round(np.random.uniform(0.7, 0.99), 2)
+        })
+    
+    data = {
+        'frame_id': os.path.splitext(os.path.basename(filepath))[0],
+        'detections': detections
+    }
+    
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
 def create_sync_json(num_frames: int, filepath: str):
     """Create data synchronization JSON."""
     entries = []
@@ -362,6 +396,8 @@ def main():
     # Create directories
     os.makedirs(IMAGES_DIR, exist_ok=True)
     os.makedirs(RADAR_DIR, exist_ok=True)
+    camera_dir = os.path.join(OUTPUT_DIR, "camera")
+    os.makedirs(camera_dir, exist_ok=True)
     
     # Generate frames
     print(f"\nGenerating {NUM_FRAMES} frames...")
@@ -372,9 +408,11 @@ def main():
         
         img_path = os.path.join(IMAGES_DIR, f"{i:03d}.jpg")
         radar_path = os.path.join(RADAR_DIR, f"{i:03d}.json")
+        camera_path = os.path.join(camera_dir, f"{i:03d}.json")
         
         create_image(objects, lanes, img_path)
         create_radar_json(objects, radar_path)
+        create_camera_json(objects, camera_path)
         
         print(f"  Frame {i}: {len(objects)} objects")
     
@@ -394,6 +432,7 @@ def main():
     print(f"\n✅ Dataset generated in '{OUTPUT_DIR}/'")
     print(f"   - {NUM_FRAMES} images")
     print(f"   - {NUM_FRAMES} radar JSON files")
+    print(f"   - {NUM_FRAMES} camera detection JSON files")
     print(f"   - data_sync.json")
     print(f"   - ground_truth.json")
     print(f"   - vanishing_lines.json")

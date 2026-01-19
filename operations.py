@@ -14,6 +14,7 @@ class AppMode(Enum):
     SELECT_IMAGE = auto()      # Waiting for image point selection
     LANE_START = auto()        # Waiting for lane start point
     LANE_END = auto()          # Waiting for lane end point
+    TRAJECTORY_VIEW = auto()   # Viewing radar trajectories
 
 
 @dataclass
@@ -197,6 +198,43 @@ class OperationsController:
     def get_lanes_for_batch(self, batch: int) -> List[Tuple[int, Lane]]:
         """Get all lanes for a specific batch with their indices."""
         return [(i, l) for i, l in enumerate(self.lanes) if l.batch == batch]
+
+    def restore_points(self, points_data: List[dict]):
+        """Restore points from list of dicts."""
+        self.pairs.clear()
+        self._pair_undo_stack.clear()
+        
+        for p in points_data:
+            # Handle both simplified and full dicts
+            pair = PointPair(
+                batch=p.get('batch', self.current_batch),
+                radar_id=p.get('radar_id', -1),
+                radar_x=p.get('radar_x', 0.0),
+                radar_y=p.get('radar_y', 0.0),
+                radar_u=p.get('radar_u', 0.0),
+                radar_v=p.get('radar_v', 0.0),
+                pixel_u=p.get('pixel_u', 0.0),
+                pixel_v=p.get('pixel_v', 0.0),
+                radar_range=p.get('radar_range', 0.0),
+                radar_velocity=p.get('radar_velocity', 0.0),
+                radar_rcs=p.get('radar_rcs', 0.0)
+            )
+            self.pairs.append(pair)
+            
+        print(f"[Operations] Restored {len(self.pairs)} points from DB")
+            
+    def restore_lanes(self, lanes_data: List[dict]):
+        """Restore lanes from list of dicts."""
+        self.lanes.clear()
+        self._lane_undo_stack.clear()
+        
+        for l in lanes_data:
+            lane = Lane(
+                start=tuple(l.get('start', (0,0))),
+                end=tuple(l.get('end', (0,0))),
+                batch=l.get('batch', self.current_batch)
+            )
+            self.lanes.append(lane)
     
     # -------------------------------------------------------------------------
     # Undo

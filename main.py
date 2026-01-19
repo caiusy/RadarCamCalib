@@ -18,6 +18,7 @@ Date: 2026-01-13
 
 import sys
 import os
+import json
 
 from datetime import datetime
 
@@ -27,9 +28,10 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFrame, QPushButton, QSlider, QLabel, QSplitter, QFileDialog,
     QStatusBar, QDoubleSpinBox, QGroupBox, QMessageBox, QRadioButton,
-    QSizePolicy
+    QSizePolicy, QListWidget, QSpinBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QColor, QFont
 
 from config import COLORS, QSS, MAX_POINT_PAIRS
 from backend import DataManager, Calibration, DataExporter
@@ -45,6 +47,16 @@ try:
     from calib_manager import CalibrationManager
 except ImportError:
     CalibrationManager = None
+
+try:
+    from trajectory_db import TrajectoryDB
+except ImportError:
+    TrajectoryDB = None
+
+try:
+    from trajectory_dialog import TrajectoryMatchDialog
+except ImportError:
+    TrajectoryMatchDialog = None
 
 
 class MainWindow(QMainWindow):
@@ -72,9 +84,17 @@ class MainWindow(QMainWindow):
         
         print(f"[DEBUG] calib_mgr initialized: {self.calib_mgr is not None}")
         
+        # Trajectory database
+        self.trajectory_db = TrajectoryDB() if TrajectoryDB else None
+        self._trajectory_mode_active = False
+        self._match_dialog = None
+        
         self._setupUI()
         self._connectSignals()
         self._updateModeUI()
+        
+        # Auto-load saved calibration state
+        self._autoLoadState()
     
     def _setupUI(self):
         central = QWidget()
@@ -140,8 +160,10 @@ class MainWindow(QMainWindow):
         self.radio_pair = QRadioButton("Point Pair")
         self.radio_pair.setChecked(True)
         self.radio_lane = QRadioButton("Lane (2pts)")
+        self.radio_trajectory = QRadioButton("🔍 Trajectory")
         l3.addWidget(self.radio_pair)
         l3.addWidget(self.radio_lane)
+        l3.addWidget(self.radio_trajectory)
         lay.addWidget(g3)
         
         # === Camera ===
@@ -266,6 +288,42 @@ class MainWindow(QMainWindow):
         self.lbl_lanes = QLabel("Lanes: 0")
         lay.addWidget(self.lbl_lanes)
         
+        # Trajectory ID selector (hidden by default)
+        self.trajectory_group = QGroupBox("Trajectory")
+        self.trajectory_group.setVisible(False)
+        traj_lay = QVBoxLayout(self.trajectory_group)
+        
+        # Quick select list
+        self.trajectory_list = QListWidget()
+        self.trajectory_list.setMaximumHeight(120)
+        self.trajectory_list.setStyleSheet("background: #2a2a2a; color: #fff; font-size: 11px;")
+        self.trajectory_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.trajectory_list.customContextMenuRequested.connect(self._showTrajectoryContextMenu)
+        traj_lay.addWidget(self.trajectory_list)
+        
+        # Button to open matching dialog
+        self.btn_match_dialog = QPushButton("🔗 Match Radar↔Camera")
+        self.btn_match_dialog.setToolTip("Open dialog to create radar-camera trajectory pairs")
+        self.btn_match_dialog.setStyleSheet("padding: 6px; font-weight: bold;")
+        traj_lay.addWidget(self.btn_match_dialog)
+        
+        
+        # Playback control
+        self.btn_play = QPushButton("▶ Play")
+        self.btn_play.setToolTip("Play trajectory visualization")
+        self.btn_play.clicked.connect(self._togglePlayback)
+        traj_lay.addWidget(self.btn_play) 
+        
+        self.spin_fps = QSpinBox()
+        self.spin_fps.setRange(1, 60)
+        self.spin_fps.setValue(10)
+        self.spin_fps.setSuffix(" FPS")
+        self.spin_fps.setToolTip("Playback Speed (Frames Per Second)")
+        self.spin_fps.setFixedWidth(80)
+        traj_lay.addWidget(self.spin_fps)
+        
+        lay.addWidget(self.trajectory_group)
+        
         lay.addStretch()
         
         # Mode status
@@ -329,6 +387,12 @@ class MainWindow(QMainWindow):
         self.image_vp.radarClicked.connect(self._onRadarClicked)
         self.image_vp.imageClicked.connect(self._onImageClicked)
         self.image_vp.clicked.connect(self._onViewportClicked)
+        
+        # Trajectory mode
+        self.radio_trajectory.toggled.connect(self._onTrajectoryModeToggle)
+        self.bev_vp.trajectoryPointClicked.connect(self._onTrajectoryPointClicked)
+        self.trajectory_list.itemClicked.connect(self._onTrajectoryIdSelected)
+        self.btn_match_dialog.clicked.connect(self._onOpenMatchDialog)
     
     # =========================================================================
     # Data Loading
@@ -341,11 +405,39 @@ class MainWindow(QMainWindow):
             n = self.data_mgr.load_sync_json(path)
             self.slider.setMaximum(n - 1)
             self.slider.setEnabled(True)
-            self.slider.setValue(0)
             self.btn_prev.setEnabled(True)
             self.btn_next.setEnabled(True)
             self._loadBatch(0)
-            self.statusbar.showMessage(f"Loaded {n} batches")
+            
+            # Playback
+            self._play_timer = QTimer(self)
+            self._play_timer.timeout.connect(self._play_step)
+            self._matched_pairs_cache = {} # {radar_id: camera_id}
+            
+            # Initial UI Update DB with dataset path (radar_data.db in same dir as radar folder usually, or data_root)
+            # data_mgr.data_root is set by load_sync_json
+            db_path = os.path.join(self.data_mgr.data_root, 'radar_data.db')
+            print(f"[DB] Initializing database at {db_path}")
+            
+            # Re-init DB with file path
+            if hasattr(self, 'trajectory_db'):
+                self.trajectory_db.close()
+            self.trajectory_db = TrajectoryDB(db_path)
+            
+            # Load radar files if new DB
+            if not self.trajectory_db.loaded:
+                print("[DB] Loading radar files into database...")
+                self.statusbar.showMessage("⏳ Parsing radar files into database...")
+                QApplication.processEvents()
+                count = self.trajectory_db.load_all_radar_files(self.data_mgr.data_root)
+                if count > 0:
+                     self.trajectory_db.loaded = True
+                     self.statusbar.showMessage(f"✅ Loaded {count} points into DB")
+            
+            # Restore previous session state (calibration, points)
+            self._autoLoadState()
+            
+            self.statusbar.showMessage(f"Loaded {n} batches and database")
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
     
@@ -370,6 +462,49 @@ class MainWindow(QMainWindow):
     # =========================================================================
     # Batch Navigation
     # =========================================================================
+    def _showTrajectoryContextMenu(self, pos):
+        """Context menu for trajectory list (Unbind)."""
+        item = self.trajectory_list.itemAt(pos)
+        if not item:
+            return
+            
+        import re
+        match = re.match(r'🔗 R(\d+)↔C(\d+)', item.text())
+        if match:
+            rid = int(match.group(1))
+            cid = int(match.group(2))
+            
+            from PyQt6.QtWidgets import QMenu
+            menu = QMenu(self)
+            action_unbind = menu.addAction("❌ Unbind Pair")
+            action = menu.exec(self.trajectory_list.mapToGlobal(pos))
+            
+            if action == action_unbind:
+                self._unbindPair(rid, cid)
+
+    def _unbindPair(self, rid, cid):
+        """Unbind a pair."""
+        # Delete from DB
+        try:
+            self.trajectory_db.cursor.execute(
+                "DELETE FROM matched_pairs WHERE radar_id=? AND camera_id=?", 
+                (rid, cid)
+            )
+            self.trajectory_db.conn.commit()
+            print(f"[TrajectoryDB] Unbound pair R{rid}↔C{cid}")
+            
+            # Update Cache
+            if rid in self._matched_pairs_cache:
+                del self._matched_pairs_cache[rid]
+                
+            # Update List UI
+            # We just re-enter mode to refresh list easily
+            self.trajectory_list.clear()
+            self._enterTrajectoryMode()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to unbind: {e}")
+
     def _goBatch(self, delta: int):
         new_idx = self.ops.current_batch + delta
         if 0 <= new_idx < self.data_mgr.num_batches:
@@ -401,7 +536,11 @@ class MainWindow(QMainWindow):
         
         # Load radar (using refresh for correct coordinates)
         if radar_data:
-            self._refreshBEV()
+             # If Playing, hide background to show only selected target
+             if self.btn_play.text() == "⏸ Pause":
+                 self.bev_vp.clearAll()
+             else:
+                 self._refreshBEV()
         
         # Project radar to image
         self._projectRadar()
@@ -410,6 +549,10 @@ class MainWindow(QMainWindow):
         self._redrawPairs()
         self._redrawLanes()
         
+        # Visualize Trajectory Playback (Frame-by-Frame)
+        if self.radio_trajectory.isChecked() and self._current_trajectory_id is not None:
+             self._visualizeTrajectoryAtFrame(idx, radar_data)
+             
         # Update UI
         self.lbl_batch.setText(f"{idx + 1}/{self.data_mgr.num_batches}")
         
@@ -538,6 +681,7 @@ class MainWindow(QMainWindow):
                 self.statusbar.showMessage(f"✅ Pitch: {pitch:.4f} rad ({np.degrees(pitch):.2f}°)")
                 print(f"[DEBUG] Pitch computed: {pitch}")
                 self._refreshBEV()
+                self._autoSaveState()  # Auto-save after pitch calculation
             else:
                 self.statusbar.showMessage("❌ Failed to compute pitch")
         except Exception as e:
@@ -568,6 +712,7 @@ class MainWindow(QMainWindow):
             
             self._refreshBEV()
             self._projectRadar()  # Refresh green dots on image
+            self._autoSaveState()  # Auto-save after optimization
             QMessageBox.information(self, "Success", f"Pitch optimized using {n} pairs.\nNew Pitch: {new_pitch:.5f}")
             
         except Exception as e:
@@ -606,9 +751,84 @@ class MainWindow(QMainWindow):
             
             path = self.data_exporter.save_camera_params(params, self.data_mgr.data_root)
             QMessageBox.information(self, "Saved", f"Parameters saved to:\n{os.path.basename(path)}")
-            
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save params: {e}")
+    
+    def _autoSaveState(self):
+        """Auto-save calibration state and points to DB (persistent)."""
+        if not self.calib_mgr: 
+            return
+            
+        cam_params = {
+            'height': self.spin_h.value(),
+            'fx': self.spin_fx.value(),
+            'fy': self.spin_fy.value(),
+            'cx': self.spin_cx.value(),
+            'cy': self.spin_cy.value(),
+            'pitch': self.calib_mgr.camera.pitch
+        }
+        
+        radar_params = {
+            'yaw': self.spin_yaw.value(),
+            'x_offset': self.spin_rx.value(),
+            'y_offset': self.spin_ry.value()
+        }
+        
+        # Save to DB
+        if self.trajectory_db:
+             self.trajectory_db.save_calibration_state(cam_params, radar_params)
+             
+             # Save points (convert PointPair objects to dicts)
+             if hasattr(self, 'ops'):
+                 pair_dicts = [p.to_dict() for p in self.ops.pairs]
+                 self.trajectory_db.save_calibration_points(pair_dicts)
+                 
+             print(f"[AUTO-SAVE] Saved state to DB")
+    
+    def _autoLoadState(self):
+        """Auto-load calibration state and points from DB (persistent)."""
+        if not hasattr(self, 'trajectory_db') or not self.trajectory_db:
+             return
+             
+        try:
+            cam, radar = self.trajectory_db.load_calibration_state()
+            
+            if self.calib_mgr:
+                if cam:
+                    self.calib_mgr.update_camera_params(**cam)
+                    # Update UI
+                    self.spin_h.setValue(cam.get('height', 1.5))
+                    self.spin_fx.setValue(int(cam.get('fx', 1000)))
+                    self.spin_fy.setValue(int(cam.get('fy', 1000)))
+                    self.spin_cx.setValue(int(cam.get('cx', 640)))
+                    self.spin_cy.setValue(int(cam.get('cy', 480)))
+                    # Pitch is special
+                    if 'pitch' in cam:
+                        self.calib_mgr.camera_pitch = cam['pitch']
+                        self.lbl_pitch.setText(f"{cam['pitch']:.4f}")
+                        
+                if radar:
+                    self.calib_mgr.update_radar_params(**radar)
+                    # Update UI
+                    self.spin_yaw.setValue(radar.get('yaw', 0))
+                    self.spin_rx.setValue(radar.get('x_offset', 0))
+                    self.spin_ry.setValue(radar.get('y_offset', 3.5))
+            
+            # Load points
+            points_data = self.trajectory_db.load_calibration_points()
+            if points_data and hasattr(self, 'ops'):
+                self.ops.restore_points(points_data)
+                self._redrawPairs() # To show them on screen
+                
+            self.statusbar.showMessage("📂 Loaded calibration state from DB")
+            print(f"[AUTO-LOAD] State loaded from DB. {len(points_data)} points restored.")
+            
+            # Show popup after a short delay
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(1000, lambda: self.statusbar.showMessage("✅ Calibration state & points auto-loaded", 5000))
+            
+        except Exception as e:
+            print(f"[AUTO-LOAD] Error: {e}")
     
     def _onParamChanged(self):
         """Handle parameter changes - update and refresh BEV."""
@@ -648,8 +868,166 @@ class MainWindow(QMainWindow):
         # Restore BEV highlight (since refresh clears it)
         if self.ops.pending_radar:
             self.bev_vp.highlightRadarMarker(self.ops.pending_radar.target)
+            
+        # Auto-save immediately on any parameter change
+        self._autoSaveState()
 
     
+    def _togglePlayback(self):
+        """Toggle playback of trajectory."""
+        if self._play_timer.isActive():
+            self._play_timer.stop()
+            self.btn_play.setText("▶ Play")
+            
+            # Restore Static View
+            self.bev_vp.clearTrails() # Clear trails
+            if self._current_trajectory_id is not None:
+                self._onTrajectoryIdSelected(self._current_trajectory_id)
+                
+        else:
+            # Clear Static View to avoid overlap
+            self.bev_vp.clearTrajectories()
+            
+            # Jump to start frame of current trajectory if starting fresh
+            rid = self._current_trajectory_id
+            if rid is not None:
+                # Query start frame
+                try:
+                    self.trajectory_db.cursor.execute(
+                        "SELECT MIN(frame_id), MAX(frame_id) FROM radar_trajectories WHERE target_id=?", 
+                        (rid,)
+                    )
+                    row = self.trajectory_db.cursor.fetchone()
+                    if row and row[0] is not None:
+                        start_frame = row[0]
+                        # If current frame is far past end or before start, jump
+                        curr = self.slider.value()
+                        if curr < start_frame or curr > row[1]:
+                             self.slider.setValue(row[0])
+                except Exception as e:
+                    print(f"Error checking start frame: {e}")
+            
+            # Use FPS
+            fps = self.spin_fps.value()
+            interval = 1000 // fps
+            self._play_timer.start(interval)
+            self.btn_play.setText("⏸ Pause")
+
+    def _play_step(self):
+        """Advance frame for preview."""
+        curr = self.slider.value()
+        if curr < self.slider.maximum():
+            self.slider.setValue(curr + 1)
+        else:
+            # Stop at end (No Loop)
+            self._togglePlayback()
+            
+    def _visualizeTrajectoryAtFrame(self, frame_id, radar_data):
+        """Visualize specific trajectory targets at current frame."""
+        try:
+            rid = self._current_trajectory_id
+            if rid is None:
+                return
+                
+
+            # 1. Trail Logic (Query history for BEV trail)
+            try:
+                # Get points up to current frame for trail
+                # Table: radar_trajectories (id, frame_id, target_id, x, y, ...)
+                self.trajectory_db.cursor.execute(
+                    "SELECT x, y FROM radar_trajectories WHERE target_id=? AND frame_id <= ? ORDER BY frame_id ASC",
+                    (rid, frame_id)
+                )
+                trail_points = self.trajectory_db.cursor.fetchall() # list of (x, y)
+                if trail_points:
+                     # Transform to BEV if calibration available
+                     if self.calib_mgr:
+                         trail_points_bev = [self.calib_mgr.radar_to_bev(p[0], p[1]) for p in trail_points]
+                         self.bev_vp.drawTrajectoryTrail(trail_points_bev, QColor(0, 255, 255))
+                     else:
+                         # Fallback raw (pass as is, viewports might interpret)
+                         self.bev_vp.drawTrajectoryTrail(trail_points, QColor(0, 255, 255))
+            except Exception as e:
+                print(f"Error drawing trail: {e}")
+
+            # 2. Find Radar Point in current batch (Keep existing)
+            r_pt = None
+            if radar_data and isinstance(radar_data, dict):
+                # Safe access
+                for p in radar_data.get('targets', []): # Access 'targets' key
+                    if p.get('id') == rid:
+                        r_pt = p
+                        break
+        except Exception as e:
+            print(f"[ERROR] _visualizeTrajectoryAtFrame crash: {e}")
+            return
+        
+        # 2. Find Camera Point (query DB)
+        cid = self._matched_pairs_cache.get(rid)
+        c_pt = None
+        if cid is not None:
+            # Query DB for camera point at this frame
+            # We need a helper in TrajectoryDB, or just direct query
+            try:
+                self.trajectory_db.cursor.execute(
+                    "SELECT u, v, w, h FROM camera_trajectories WHERE target_id=? AND batch_id=?", 
+                    (cid, frame_id)
+                )
+                row = self.trajectory_db.cursor.fetchone()
+                if row:
+                    c_pt = {'u': row[0], 'v': row[1], 'w': row[2], 'h': row[3]}
+            except Exception as e:
+                print(f"Error querying camera pt: {e}")
+
+        # 3. Draw
+        # Highlight Radar in BEV
+        if r_pt:
+            # Highlight in BEV (Flash color)
+            # Use custom head drawing because standard markers are hidden
+            rx_val = r_pt.get('x')
+            ry_val = r_pt.get('y')
+            if rx_val is not None and ry_val is not None:
+                if self.calib_mgr:
+                    tx, ty = self.calib_mgr.radar_to_bev(rx_val, ry_val)
+                    self.bev_vp.drawTrajectoryHead(tx, ty, QColor(0, 255, 255)) # Cyan Head
+                else:
+                    self.bev_vp.drawTrajectoryHead(rx_val, ry_val, QColor(0, 255, 255)) # Cyan Head
+            
+            # Highlight in Image (Project it)
+            # _projectRadar already drew green dots. We overwrite/add special marker.
+            # We need world coords.
+            rx = r_pt.get('x', 0)
+            ry = r_pt.get('y', 0)
+            # Use calib_mgr to project
+            if self.calib_mgr and self.calib_mgr.is_calibrated: # Check calib_mgr exists
+                # Chain: Radar -> BEV -> Image
+                tx, ty = self.calib_mgr.transformer.radar_to_bev(rx, ry)
+                u, v = self.calib_mgr.transformer.bev_to_image(tx, ty)
+                
+                if 0 <= u < self.calib_mgr.camera.cx * 2 and 0 <= v < self.calib_mgr.camera.cy * 2:
+                    # Use existing method in ImageViewport
+                    self.image_vp.showTrajectoryProjection(u, v, rid)
+
+        # Highlight Camera in Image
+        if c_pt:
+            # Draw box or cross
+            u, v = c_pt['u'], c_pt['v']
+            w, h = c_pt['w'], c_pt['h']
+            # Draw rect? Helper addRect? 
+            # ImageViewport doesn't have addRect. Use addPairMarker for center.
+            self.image_vp.addPairMarker(u + w/2, v + h/2, f"C{cid}", QColor(255, 0, 255), size=8) # Magenta
+            
+        # Draw Connection if both present
+        if r_pt and c_pt and self.calib_mgr and self.calib_mgr.is_calibrated:
+            # Radar Img Proj
+            tx, ty = self.calib_mgr.transformer.radar_to_bev(r_pt.get('x'), r_pt.get('y'))
+            u_r, v_r = self.calib_mgr.transformer.bev_to_image(tx, ty)
+            
+            # Camera Img Point
+            u_c = c_pt['u'] + c_pt['w']/2
+            v_c = c_pt['v'] + c_pt['h']/2
+            self.image_vp.drawConnectionLine(u_r, v_r, u_c, v_c, QColor(255, 255, 0)) # Yellow link
+
     def _onModeSwitch(self):
         self.ops.cancel()
         self.image_vp.clearPreview()
@@ -885,6 +1263,385 @@ class MainWindow(QMainWindow):
             saved.append(f"{self.ops.num_lanes} lanes")
         
         self.statusbar.showMessage(f"Saved: {', '.join(saved)}")
+    
+    # =========================================================================
+    # Trajectory Mode (轨迹模式)
+    # =========================================================================
+    
+    def _onTrajectoryModeToggle(self, checked: bool):
+        """Handle trajectory mode radio button toggle."""
+        if checked:
+            self._enterTrajectoryMode()
+        else:
+            self._exitTrajectoryMode()
+    
+    def _enterTrajectoryMode(self):
+        """Enter trajectory viewing mode."""
+        if not self.trajectory_db:
+            QMessageBox.warning(self, "Error", "TrajectoryDB not available")
+            self.radio_pair.setChecked(True)
+            return
+            
+        if not self.data_mgr.data_root:
+            QMessageBox.warning(self, "Warning", "Please load sync JSON first")
+            self.radio_pair.setChecked(True)
+            return
+        
+        self._trajectory_mode_active = True
+        self.ops.mode = AppMode.TRAJECTORY_VIEW
+        
+        # Load all trajectories
+        self.statusbar.showMessage("Loading trajectories...")
+        QApplication.processEvents()
+        
+        count = self.trajectory_db.load_all_radar_files(self.data_mgr.data_root)
+        if count == 0:
+            QMessageBox.warning(self, "Warning", "No trajectory data found")
+            self._exitTrajectoryMode()
+            return
+        
+        # Clear normal display
+        self.image_vp.clearRadarMarkers()
+        self.image_vp.clearPairMarkers()
+        self.bev_vp.clearAll()
+        
+        # Load radar trajectories to BEV (solid lines, circles)
+        trajectories = self.trajectory_db.get_all_trajectories()
+        self.bev_vp.loadTrajectories(trajectories)
+        
+        # Load camera trajectories to BEV (dashed lines, squares)
+        camera_trajectories = self.trajectory_db.get_all_camera_trajectories()
+        self.bev_vp.loadCameraTrajectories(camera_trajectories)
+        
+        self.bev_vp.setTrajectoryMode(True)
+        
+        n_targets = self.trajectory_db.get_target_count()
+        n_frames = self.trajectory_db.get_frame_count()
+        self.statusbar.showMessage(f"🔍 Trajectory Mode: {n_targets} targets, {n_frames} frames | Radar: ●solid  Camera: ■dashed")
+        self.lbl_mode.setText("🔍 Trajectory")
+        self.lbl_mode.setStyleSheet("padding: 6px 12px; background: #664400; border-radius: 4px; font-weight: bold;")
+        
+        # Show trajectory ID list and populate it
+        self.trajectory_group.setVisible(True)
+        self.trajectory_list.clear()
+        self.trajectory_list.addItem("★ All Targets")
+        
+        # Load saved pairs from DB (persistent)
+        # self.trajectory_db.load_pairs_from_disk() # Removed: using DB directly
+        saved_pairs = self.trajectory_db.get_matched_pairs()
+        print(f"[DEBUG] _enterTrajectoryMode: Found {len(saved_pairs)} saved pairs in DB")
+        
+        # Cache for playback
+        self._matched_pairs_cache = {r: c for r, c in saved_pairs}
+        
+        for r, c in saved_pairs:
+            label = f"🔗 R{r}↔C{c}"
+            self.trajectory_list.addItem(label)
+        
+        # Store all trajectories for filtering
+        self._all_trajectories = trajectories
+        self._all_camera_trajectories = camera_trajectories
+        self._current_trajectory_id = None
+    
+    def _exitTrajectoryMode(self):
+        """Exit trajectory mode and restore normal display."""
+        self._trajectory_mode_active = False
+        
+        # Hide trajectory ID list
+        self.trajectory_group.setVisible(False)
+        self.trajectory_list.clear()
+        
+        # Clear trajectory display
+        self.bev_vp.clearTrajectories()
+        self.bev_vp.setTrajectoryMode(False)
+        self.image_vp.clearTrajectoryProjection()
+        
+        # Restore normal display
+        self._loadBatch(self.data_mgr.current_batch)
+        self._updateModeUI()
+    
+    def _onTrajectoryIdSelected(self, item_or_id):
+        """Handle selection of a target ID from the list (Item or int ID)."""
+        if not self._trajectory_mode_active:
+            return
+            
+        rid = None
+        cid = None
+        
+        # 1. Determine RID/CID based on input type
+        if isinstance(item_or_id, int):
+            rid = item_or_id
+            cid = self._matched_pairs_cache.get(rid)
+        elif hasattr(item_or_id, 'text'):
+            text = item_or_id.text()
+            if text.startswith("★"):  # All targets
+                rid = None
+            else:
+                # Extract IDs from "🔗 R{r}↔C{c}" format
+                import re
+                match = re.match(r'🔗 R(\d+)↔C(\d+)', text)
+                if match:
+                    rid = int(match.group(1))
+                    cid = int(match.group(2))
+        
+        # 2. Update Display
+        self.bev_vp.clearTrajectories()
+        
+        if rid is None:
+            # Show all trajectories
+            self._current_trajectory_id = None
+            self.bev_vp.loadTrajectories(self._all_trajectories)
+            self.bev_vp.loadCameraTrajectories(self._all_camera_trajectories)
+            self.statusbar.showMessage(f"🔍 Showing all {len(self._all_trajectories)} targets (Radar + Camera)")
+        else:
+            self._current_trajectory_id = rid
+            
+            # Filter to show only this pair
+            filtered_radar = {rid: self._all_trajectories.get(rid, [])}
+            filtered_camera = {}
+            if cid is not None:
+                filtered_camera = {cid: self._all_camera_trajectories.get(cid, [])}
+            
+            self.bev_vp.loadTrajectories(filtered_radar)
+            self.bev_vp.loadCameraTrajectories(filtered_camera)
+            
+            radar_pts = len(self._all_trajectories.get(rid, []))
+            camera_pts = len(self._all_camera_trajectories.get(cid, [])) if cid is not None else 0
+            self.statusbar.showMessage(f"🔍 Trajectory R{rid}" + (f"↔C{cid}" if cid is not None else "") + f": Radar {radar_pts}pts")
+
+    # ... (handlers for click/dialog open/preview omitted as they are unchanged) ...
+
+    def _onMatchPairSelected(self, radar_id: int, camera_id: int):
+        """Handle pair selection from match dialog."""
+        print(f"\n\n[DEBUG] >>> _onMatchPairSelected TRIGGERED with R{radar_id}, C{camera_id} <<<\n\n")
+        
+        if not self._trajectory_mode_active:
+            print("[DEBUG] Trajectory mode not active, ignoring.")
+            return
+            
+        # Add custom pair to list and save to DB
+        if radar_id >= 0 and camera_id >= 0:
+            label = f"🔗 R{radar_id}↔C{camera_id}"
+            
+            # Check if already exists
+            found = False
+            for i in range(self.trajectory_list.count()):
+                if self.trajectory_list.item(i).text() == label:
+                    self.trajectory_list.setCurrentRow(i)
+                    found = True
+                    break
+            
+            if not found:
+                self.trajectory_list.insertItem(1, label)  # Insert after "All Targets"
+                self.trajectory_list.setCurrentRow(1)
+                
+                # Save to DB (Persistent table)
+                print(f"[DEBUG] Saving matched pair R{radar_id}-C{camera_id} to DB...")
+                try:
+                    self.trajectory_db.add_matched_pair(radar_id, camera_id)
+                    # Verify immediately?
+                    self.trajectory_db.cursor.execute(
+                        "SELECT * FROM matched_pairs WHERE radar_id=? AND camera_id=?", 
+                        (radar_id, camera_id)
+                    )
+                    row = self.trajectory_db.cursor.fetchone()
+                    print(f"[DEBUG] Verification: Saved pair row = {row}")
+                    
+                    # Show confirmation
+                    QMessageBox.information(self, "Saved", f"Matched Pair R{radar_id}↔C{camera_id} Saved!\nCheck Terminal for verification.")
+                    
+                except Exception as e:
+                    print(f"[ERROR] Failed to save pair: {e}")
+                    QMessageBox.critical(self, "DB Error", f"Failed to save matched pair: {e}")
+                
+        # Clear current display
+        self.bev_vp.clearTrajectories()
+        
+        if radar_id == -1 and camera_id == -1:
+            # Show all
+            self.bev_vp.loadTrajectories(self._all_trajectories)
+            self.bev_vp.loadCameraTrajectories(self._all_camera_trajectories)
+            self.statusbar.showMessage(f"🔍 Showing all {len(self._all_trajectories)} trajectories")
+            
+            # Reset selection to "All Targets"
+            self.trajectory_list.setCurrentRow(0)
+        else:
+            # Show selected pair
+            if radar_id >= 0:
+                filtered_radar = {radar_id: self._all_trajectories.get(radar_id, [])}
+                self.bev_vp.loadTrajectories(filtered_radar)
+            
+            if camera_id >= 0:
+                filtered_camera = {camera_id: self._all_camera_trajectories.get(camera_id, [])}
+                self.bev_vp.loadCameraTrajectories(filtered_camera)
+            
+            radar_pts = len(self._all_trajectories.get(radar_id, []))
+            camera_pts = len(self._all_camera_trajectories.get(camera_id, []))
+            self.statusbar.showMessage(f"🔗 Matched Pair: R{radar_id}({radar_pts}pts) ↔ C{camera_id}({camera_pts}pts)")
+    
+    def _onTrajectoryPointClicked(self, target_id: int, frame_id: int):
+        """Handle click on trajectory point in BEV."""
+        if not self._trajectory_mode_active:
+            return
+            
+        # Get radar point data
+        radar_point = self.trajectory_db.get_point_at_frame(target_id, frame_id)
+        if not radar_point:
+            return
+            
+        x_radar, y_radar, range_val, velocity, rcs = radar_point
+        
+        # Get camera point data (if available)
+        camera_point = self.trajectory_db.get_camera_point_at_frame(target_id, frame_id)
+        
+        # Load corresponding batch/frame
+        self.slider.setValue(frame_id)
+        self._loadBatch(frame_id)
+        
+        # Clear previous projections
+        self.image_vp.clearTrajectoryProjection()
+        
+        # Show radar projection (calculated via homography)
+        projection_result = None
+        if self.calib_mgr:
+            x_bev, y_bev = self.calib_mgr.radar_to_bev(x_radar, y_radar)
+            projection_result = self.calib_mgr.bev_to_image(x_bev, y_bev)
+            
+            if projection_result:
+                u, v = projection_result
+                self.image_vp.showTrajectoryProjection(u, v, target_id)
+        
+        # Show camera detection position (ground truth from detection)
+        if camera_point:
+            cam_u, cam_v = camera_point
+            self.image_vp.showCameraDetection(cam_u, cam_v, target_id)
+            
+            # Draw connecting line if both exist
+            if projection_result:
+                u, v = projection_result
+                self.image_vp.drawConnectionLine(u, v, cam_u, cam_v)
+        
+        # Highlight the point in BEV
+        self.bev_vp.highlightTrajectoryPoint(target_id, frame_id)
+        
+        # Status message with both radar and camera info
+        msg = f"Target {target_id} @ Frame {frame_id}: Radar(x={x_radar:.1f}m, y={y_radar:.1f}m, v={velocity:.1f}m/s)"
+        if camera_point:
+            msg += f" | Camera(u={camera_point[0]:.0f}, v={camera_point[1]:.0f})"
+        self.statusbar.showMessage(msg)
+    
+    def _onOpenMatchDialog(self):
+        """Open the trajectory matching dialog."""
+        if not self._trajectory_mode_active:
+            return
+            
+        if not TrajectoryMatchDialog:
+            QMessageBox.warning(self, "Error", "TrajectoryMatchDialog not available")
+            return
+        
+        # Create dialog if not exists
+        if not hasattr(self, '_match_dialog') or self._match_dialog is None:
+            self._match_dialog = TrajectoryMatchDialog(self.trajectory_db, self)
+            self._match_dialog.pairSelected.connect(self._onMatchPairSelected)
+            self._match_dialog.radarPreview.connect(self._onRadarPreview)
+            self._match_dialog.cameraPreview.connect(self._onCameraPreview)
+            # Direct Callback (Backup)
+            self._match_dialog.set_on_pair_selected(self._onMatchPairSelected)
+        
+        self._match_dialog.refresh()
+        self._match_dialog.show()
+        self._match_dialog.raise_()
+    
+    def _onRadarPreview(self, radar_id: int):
+        """Preview radar trajectory when selected in match dialog."""
+        if not self._trajectory_mode_active:
+            return
+        
+        # Clear and show only this radar trajectory
+        self.bev_vp.clearTrajectories()
+        filtered_radar = {radar_id: self._all_trajectories.get(radar_id, [])}
+        self.bev_vp.loadTrajectories(filtered_radar)
+        
+        # Show first frame of this trajectory
+        traj = self._all_trajectories.get(radar_id, [])
+        if traj:
+            frame_id = traj[0][0]  # First frame
+            self.slider.setValue(frame_id)
+            self._loadBatch(frame_id)
+        
+        pts = len(traj)
+        self.statusbar.showMessage(f"👁 Preview Radar R{radar_id}: {pts} points")
+    
+    def _onCameraPreview(self, camera_id: int):
+        """Preview camera trajectory when selected in match dialog."""
+        if not self._trajectory_mode_active:
+            return
+        
+        # Clear and show only this camera trajectory
+        self.bev_vp.clearTrajectories()
+        filtered_camera = {camera_id: self._all_camera_trajectories.get(camera_id, [])}
+        self.bev_vp.loadCameraTrajectories(filtered_camera)
+        
+        # Show first frame of this trajectory
+        traj = self._all_camera_trajectories.get(camera_id, [])
+        if traj:
+            frame_id = traj[0][0]  # First frame
+            self.slider.setValue(frame_id)
+            self._loadBatch(frame_id)
+            
+            # Show camera detection on image
+            u, v = traj[0][1], traj[0][2]
+            self.image_vp.clearTrajectoryProjection()
+            self.image_vp.showCameraDetection(u, v, camera_id)
+        
+        pts = len(traj)
+        self.statusbar.showMessage(f"👁 Preview Camera C{camera_id}: {pts} points")
+    
+    def _onMatchPairSelected(self, radar_id: int, camera_id: int):
+        """Handle pair selection from match dialog."""
+        if not self._trajectory_mode_active:
+            return
+            
+        # Add custom pair to list
+        if radar_id >= 0 and camera_id >= 0:
+            label = f"🔗 R{radar_id}↔C{camera_id}"
+            
+            # Check if already exists
+            found = False
+            for i in range(self.trajectory_list.count()):
+                if self.trajectory_list.item(i).text() == label:
+                    self.trajectory_list.setCurrentRow(i)
+                    found = True
+                    break
+            
+            if not found:
+                self.trajectory_list.insertItem(1, label)  # Insert after "All Targets"
+                self.trajectory_list.setCurrentRow(1)
+        
+        # Clear current display
+        self.bev_vp.clearTrajectories()
+        
+        if radar_id == -1 and camera_id == -1:
+            # Show all
+            self.bev_vp.loadTrajectories(self._all_trajectories)
+            self.bev_vp.loadCameraTrajectories(self._all_camera_trajectories)
+            self.statusbar.showMessage(f"🔍 Showing all {len(self._all_trajectories)} trajectories")
+            
+            # Reset selection to "All Targets"
+            self.trajectory_list.setCurrentRow(0)
+        else:
+            # Show selected pair
+            if radar_id >= 0:
+                filtered_radar = {radar_id: self._all_trajectories.get(radar_id, [])}
+                self.bev_vp.loadTrajectories(filtered_radar)
+            
+            if camera_id >= 0:
+                filtered_camera = {camera_id: self._all_camera_trajectories.get(camera_id, [])}
+                self.bev_vp.loadCameraTrajectories(filtered_camera)
+            
+            radar_pts = len(self._all_trajectories.get(radar_id, []))
+            camera_pts = len(self._all_camera_trajectories.get(camera_id, []))
+            self.statusbar.showMessage(f"🔗 Matched Pair: R{radar_id}({radar_pts}pts) ↔ C{camera_id}({camera_pts}pts)")
 
 
 def main():

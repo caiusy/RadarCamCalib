@@ -12,7 +12,22 @@ A PyQt6-based desktop application for calibrating radar-camera systems and annot
 
 ---
 
-## 📅 Latest Updates (2026-01-15)
+## 📅 Latest Updates (2026-01-20)
+
+### 🎥 Trajectory Playback & Analysis
+![Playback Preview](assets/playback_preview.png)
+
+- **Focused Playback Mode**: Automatically hides background radar points during playback to focus solely on the selected target's motion path.
+- **Enhanced Visualization**:
+  - **Connected Trails**: Trajectory points are now linked by smooth, fading gradient lines.
+  - **Smart Head Highlight**: Current frame position is marked with a distinct, high-z-index glowing marker ("Cyan Head").
+  - **Correct Alignment**: All trajectory visuals are strictly calibrated to match the background radar cloud.
+- **Stability Fixes**:
+  - Solved playback end crash (ID type mismatch).
+  - Fixed duplicate UI initialization bug in dialogs.
+  - Robust persistence saving with database verification.
+
+## 📅 Previous Updates (2026-01-15)
 
 - **Pitch Optimization**: Implemented global optimization algorithm to refine camera pitch using all collected point pairs (`Optimize` button).
 - **JSON Export**: Enhanced parameter saving to include full **Homography Matrices** (`radar_to_bev` and `camera_to_bev`) for direct coordinate mapping.
