@@ -38,7 +38,7 @@ A PyQt6-based desktop application for calibrating radar-camera systems and annot
 
 ## 🧭 Engineering Plan
 
-- For a staged refactor and architecture roadmap, see [ENGINEERING_PLAN.md](ENGINEERING_PLAN.md).
+- For the staged implementation roadmap with phase goals, validation, and execution steps, see [ENGINEERING_PLAN.md](ENGINEERING_PLAN.md).
 
 
 ## 🎯 Features
