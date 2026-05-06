@@ -1,0 +1,45 @@
+dataset:
+  root: ""
+  sync_folder: "sync"
+
+sensors:
+  default_camera_sensor_id: 1
+  default_radar_sensor_id: 2
+
+classes:
+  default_class: "vehicle"
+  valid_classes:
+    - vehicle
+    - car
+    - truck
+    - bus
+    - cyclist
+    - pedestrian
+    - unknown
+
+calibration:
+  ransac_threshold: 5.0
+  min_matched_points: 4
+
+bev:
+  x_range: [-100, 100]
+  y_range: [0, 300]
+  resolution: 1.0
+
+trajectory:
+  min_track_len: 5
+
+range_estimation:
+  x_range: [-100, 100]
+  y_range: [0, 300]
+  resolution: 1.0
+  min_count: 3
+  dbscan_eps: 3.0
+  dbscan_min_samples: 10
+  min_area_m2: 20.0
+
+ui:
+  show_track_id: true
+  show_projected_points: true
+  show_trajectories: false
+  show_range_polygon: true

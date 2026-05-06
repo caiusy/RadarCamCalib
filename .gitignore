@@ -1,0 +1,32 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Data & logs
+dataset/
+mock_dataset/
+*.db
+*.log
+*.pid
+app.log
+crash.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Calibration state (generated)
+calibration_state.json
+
+# Gemini
+.gemini/
