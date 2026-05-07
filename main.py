@@ -35,6 +35,7 @@ from ui.image_view import ImageViewport
 from ui.bev_view import BEVViewport
 from ui.operations import OperationsController, AppMode
 from visualization.color_map import UI_COLORS, PAIR_COLORS
+from range_estimation.range_estimator import estimate_radar_range
 
 MAX_POINT_PAIRS = 10
 
@@ -64,30 +65,41 @@ QSplitter::handle { background: #3E3E42; }
 
 
 class MainWindow(QMainWindow):
-    """Main application window - refactored version."""
+    """Main application window (主窗口).
+
+    Integrates all modules:
+    - SyncDataset: data loading and frame navigation (数据加载与帧导航)
+    - CalibrationSession: homography computation from point pairs (标定计算)
+    - TrajectoryDB: SQLite trajectory storage with caching (轨迹数据库)
+    - OperationsController: UI interaction state machine (操作状态机)
+
+    Two main modes:
+    1. Point Pair Mode (点对模式): select radar→image correspondences for calibration
+    2. Trajectory Mode (轨迹模式): view/play all-frame trajectory data from DB
+    """
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Radar-Camera Fusion Calibration System")
         self.setMinimumSize(1280, 720)
 
-        # Core modules
-        self.dataset = SyncDataset()
-        self.calib_session = CalibrationSession()
-        self.trajectory_db = TrajectoryDB()
-        self.ops = OperationsController()
+        # --- Core modules (核心模块) ---
+        self.dataset = SyncDataset()              # 数据集管理 (sync JSON + image + radar)
+        self.calib_session = CalibrationSession()  # 标定会话 (homography 计算)
+        self.trajectory_db = TrajectoryDB()        # 轨迹数据库 (SQLite, 带缓存)
+        self.ops = OperationsController()          # 操作状态机 (点对/车道线/轨迹模式)
 
-        # Play timer
+        # --- Playback timer for trajectory mode (轨迹回放定时器) ---
         self._play_timer = QTimer(self)
         self._play_timer.timeout.connect(self._play_step)
 
-        # State
-        self._trajectory_mode_active = False
-        self._current_trajectory_id = None
-        self._all_trajectories = {}
-        self._all_camera_trajectories = {}
-        self._matched_pairs_cache = {}
-        self._current_radar_objects = []  # raw dicts for click interaction
+        # --- Runtime state (运行时状态) ---
+        self._trajectory_mode_active = False        # 是否处于轨迹模式
+        self._current_trajectory_id = None          # 当前选中的轨迹 ID
+        self._all_trajectories = {}                 # 所有雷达轨迹 {target_id: [(frame,x,y),...]}
+        self._all_camera_trajectories = {}          # 所有相机轨迹
+        self._matched_pairs_cache = {}              # 已匹配的 radar↔camera 对
+        self._current_radar_objects = []             # 当前帧雷达目标 (raw dict, 用于点击交互)
 
         self._setupUI()
         self._connectSignals()
@@ -97,14 +109,26 @@ class MainWindow(QMainWindow):
     # UI Setup
     # =========================================================================
     def _setupUI(self):
+        """Build the UI layout (构建界面布局).
+
+        Layout structure:
+        ┌─────────────────────────────────────┐
+        │ TopBar: Data | Batch | Mode | Actions │
+        ├──────────────────┬──────────────────┤
+        │   ImageViewport  │   BEVViewport    │
+        │   (camera image) │   (radar BEV)    │
+        ├──────────────────┴──────────────────┤
+        │ StatusBar                            │
+        └─────────────────────────────────────┘
+        """
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self._createTopBar(layout)
-        self._createMainArea(layout)
+        self._createTopBar(layout)    # 顶部工具栏
+        self._createMainArea(layout)  # 主视图区域 (Image + BEV splitter)
 
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
@@ -172,6 +196,9 @@ class MainWindow(QMainWindow):
         self.btn_compute = QPushButton("📐 Compute H")
         self.btn_compute.setToolTip("Compute homography from point pairs")
         l5.addWidget(self.btn_compute)
+        self.btn_range = QPushButton("📡 Range")
+        self.btn_range.setToolTip("Estimate radar detection range from trajectories")
+        l5.addWidget(self.btn_range)
         lay.addWidget(g5)
 
         # Stats
@@ -225,6 +252,16 @@ class MainWindow(QMainWindow):
         parent.addWidget(splitter, 1)
 
     def _connectSignals(self):
+        """Connect all UI signals to handler slots (连接信号与槽).
+
+        Signal flow:
+        - btn_sync → _onLoadSync: 加载数据集
+        - slider → _onSlider: 帧导航
+        - radio_pair/lane → _onModeSwitch: 切换点对/车道线模式
+        - radio_trajectory → _onTrajectoryModeToggle: 切换轨迹模式
+        - image_vp.radarClicked → _onRadarClicked: 雷达点被点击
+        - image_vp.imageClicked → _onImageClicked: 图像点被点击
+        """
         self.btn_sync.clicked.connect(self._onLoadSync)
         self.btn_prev.clicked.connect(lambda: self._goBatch(-1))
         self.btn_next.clicked.connect(lambda: self._goBatch(1))
@@ -238,6 +275,7 @@ class MainWindow(QMainWindow):
         self.btn_clear.clicked.connect(self._onClear)
         self.btn_save.clicked.connect(self._onSave)
         self.btn_compute.clicked.connect(self._onComputeHomography)
+        self.btn_range.clicked.connect(self._onEstimateRange)
         self.btn_play.clicked.connect(self._togglePlayback)
 
         # Viewport interactions
@@ -252,6 +290,14 @@ class MainWindow(QMainWindow):
     # Data Loading
     # =========================================================================
     def _onLoadSync(self):
+        """加载数据集: 选择包含 sync/ 子目录的数据集根目录.
+
+        Dataset structure expected:
+        dataset_root/
+        ├── sync/    ← sync JSON files
+        ├── image/   ← camera images
+        └── radar/   ← radar JSON files
+        """
         folder = QFileDialog.getExistingDirectory(self, "Select Dataset Root")
         if not folder:
             return
@@ -267,6 +313,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to load dataset:\n{e}")
             return
 
+        # 更新导航控件
         n = self.dataset.num_frames
         self.slider.setMaximum(n - 1)
         self.slider.setEnabled(n > 0)
@@ -646,6 +693,60 @@ class MainWindow(QMainWindow):
 
         self.lbl_pairs.setText(f"Pairs: {self.ops.num_pairs}/{MAX_POINT_PAIRS}")
         self.lbl_lanes.setText(f"Lanes: {self.ops.num_lanes}")
+
+    # =========================================================================
+    # 感知范围估计 (Range Estimation)
+    # =========================================================================
+    def _onEstimateRange(self):
+        """从轨迹数据估算雷达感知范围并在 BEV 上显示多边形."""
+        if not self.dataset.dataset_root:
+            QMessageBox.warning(self, "Warning", "请先加载数据集")
+            return
+
+        self.statusbar.showMessage("正在加载轨迹数据用于范围估计...")
+        QApplication.processEvents()
+
+        import numpy as np
+
+        # 加载轨迹数据库 (自动缓存)
+        data_root = str(self.dataset.dataset_root)
+        self.trajectory_db.load_all_radar_files(data_root)
+
+        if not self.trajectory_db.loaded:
+            QMessageBox.warning(self, "Warning", "没有可用的轨迹数据")
+            return
+
+        # 收集所有轨迹点
+        all_trajs = self.trajectory_db.get_all_trajectories()
+        all_points = []
+        for tid, traj in all_trajs.items():
+            for pt in traj:
+                if len(pt) >= 3:
+                    all_points.append([pt[1], pt[2]])  # (x, y)
+
+        if len(all_points) < 10:
+            QMessageBox.warning(self, "Warning", f"轨迹点太少: {len(all_points)}")
+            return
+
+        points = np.array(all_points, dtype=np.float64)
+
+        # 运行范围估计 Pipeline
+        result = estimate_radar_range(points)
+        polygons = result.get("range_polygons", [])
+
+        if not polygons:
+            QMessageBox.information(self, "Info", "未检测到有效感知范围多边形")
+            return
+
+        # 在 BEV 上绘制
+        self.bev_vp.drawRangePolygons(polygons)
+
+        stats = result.get("stats", {})
+        self.statusbar.showMessage(
+            f"📡 感知范围: {len(polygons)} 个区域, "
+            f"输入{stats.get('total_input_points', 0)}点 → "
+            f"DBSCAN后{stats.get('after_dbscan', 0)}点"
+        )
 
 
 def main():
