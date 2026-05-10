@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional, List, Tuple
 
 from .data_models import SyncFrame, ImageFrame, RadarFrame, SensorDataItem
-from .sync_loader import load_sync_folder, get_image_items, get_radar_items, get_sensor_meta
+from .sync_loader import load_sync_folder, get_image_items, get_radar_items, get_vision_items, get_sensor_meta
 from .radar_loader import load_radar_json
 from .image_loader import load_image
 
@@ -32,6 +32,7 @@ class SyncDataset:
         self.current_index: int = -1
         self._camera_sensor_id: int = 1
         self._radar_sensor_id: int = 2
+        self._vision_sensor_id: int = 1
 
     @property
     def num_frames(self) -> int:
@@ -197,6 +198,45 @@ class SyncDataset:
                 return load_radar_json(abs_path)
             except Exception as e:
                 print(f"[WARN] Failed to load fallback radar: {e}")
+
+        return None
+
+    def get_vision(self, sync_frame=None, vision_sensor_id=None):
+        """Load the vision detection data for a sync frame.
+
+        Args:
+            sync_frame: Sync frame to load from. Uses current frame if None.
+            vision_sensor_id: Vision sensor ID. Uses default if None.
+
+        Returns:
+            Loaded VisionFrame, or None if not available.
+        """
+        frame = sync_frame or self.current_frame
+        if frame is None:
+            return None
+
+        vis_id = vision_sensor_id or self._vision_sensor_id
+        vision_items = get_vision_items(frame)
+
+        # Find vision item matching sensor ID
+        for item in vision_items:
+            if item.sensor_id == vis_id:
+                try:
+                    abs_path = self._resolve_data_path(item)
+                    from vision.vision_loader import load_vision_json
+                    return load_vision_json(abs_path)
+                except Exception as e:
+                    print(f"[WARN] Failed to load vision: {e}")
+                    return None
+
+        # Fallback: use first available vision item
+        if vision_items:
+            try:
+                abs_path = self._resolve_data_path(vision_items[0])
+                from vision.vision_loader import load_vision_json
+                return load_vision_json(abs_path)
+            except Exception as e:
+                print(f"[WARN] Failed to load fallback vision: {e}")
 
         return None
 

@@ -4,7 +4,14 @@
 > Author: **caiusy**
 
 A modular Python/PyQt6/OpenCV toolkit for radar-camera calibration, BEV visualization,
-trajectory analysis, and radar range estimation.
+trajectory analysis, vision detection fusion, radar-vision association, evaluation metrics,
+and effective detection area analysis.
+
+### 预览 / Preview
+
+| 点对标定 + BEV | 轨迹回放 |
+|:---:|:---:|
+| ![preview](assets/preview_v3.png) | ![playback](assets/playback_preview.png) |
 
 ---
 
@@ -12,13 +19,18 @@ trajectory analysis, and radar range estimation.
 
 | 功能 | 描述 |
 |------|------|
-| **数据加载** | 同步 JSON + 雷达 JSON + 图像自动关联 |
+| **数据加载** | 同步 JSON + 雷达 JSON + 图像 + 视觉检测 JSON 自动关联 |
 | **点对标定** | 交互式选择雷达→图像对应点，RANSAC Homography 计算 |
 | **车道线标定** | 绘制平行车道线自动估计消失点和 Pitch 角 |
 | **轨迹可视化** | 雷达/相机多目标轨迹 BEV 显示、配对和回放 |
 | **感知范围估计** | DBSCAN 去噪 + 栅格密度 + 轮廓提取 |
-| **模拟数据** | 一键生成带车道线和车辆的仿真数据集 |
-| **JSON 导出** | 标定结果和感知范围 JSON 标准输出 |
+| **相机参数管理** | 相机内参 (K, 畸变系数)、外参、增强版 calibration.json |
+| **视觉检测加载** | Vision JSON 加载、bbox 解析、bbox 底部中心反投影 BEV |
+| **雷达-视觉匹配** | 图像门控 + BEV 门控 + 类别兼容 + Hungarian 最优匹配 |
+| **关联评估指标** | radar_recall, radar_fp_rate, BEV 误差, 距离分箱, 车道分段, 栅格统计 |
+| **有效感知区域** | 栅格 recall 分析 → 有效区域/盲区多边形 + JSON 导出 |
+| **模拟数据** | 一键生成带 vision detection + association GT 的仿真数据集 |
+| **JSON 导出** | 标定结果、评估指标和感知范围 JSON 标准输出 |
 
 ---
 
@@ -36,10 +48,22 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### 生成模拟数据
+### 生成模拟数据 (含视觉检测和关联 GT)
 
 ```bash
-python tools/generate_mock_dataset.py --output mock_dataset --num_frames 100
+python tools/generate_mock_dataset.py --output mock_dataset --num_frames 200
+```
+
+### 自动化关联测试
+
+```bash
+python tools/auto_test_association.py --dataset mock_dataset
+```
+
+### 自动化评估测试
+
+```bash
+python tools/auto_test_evaluation.py --dataset mock_dataset
 ```
 
 ### 运行测试
@@ -62,60 +86,89 @@ RadarCamCalib/
 ├── data/                           # ① 数据层 — 数据加载与解析
 │   ├── __init__.py                 #   统一导出接口
 │   ├── data_models.py              #   核心数据结构 (dataclass)
-│   ├── sync_loader.py              #   同步 JSON 解析器
+│   ├── sync_loader.py              #   同步 JSON 解析器 (含 vision 支持)
 │   ├── radar_loader.py             #   雷达 JSON 解析 + 中→英类别映射
 │   ├── image_loader.py             #   图像加载 (OpenCV)
-│   └── sync_dataset.py             #   数据集封装 (帧导航 + 按需加载)
+│   └── sync_dataset.py             #   数据集封装 (帧导航 + 按需加载 + vision)
 │
-├── calibration/                    # ② 标定算法层 — 无 UI 依赖
+├── camera/                         # ② 相机参数层 — 内参/外参管理
+│   ├── __init__.py
+│   ├── camera_model.py             #   CameraModel 数据结构 + 投影/去畸变
+│   └── camera_io.py                #   相机参数 JSON 读写 + 增强标定格式
+│
+├── calibration/                    # ③ 标定算法层 — 无 UI 依赖
 │   ├── __init__.py
 │   ├── homography_solver.py        #   Homography + RANSAC (cv2.findHomography)
 │   ├── calibration_session.py      #   标定会话管理 (add_point → compute → result)
 │   ├── projector.py                #   坐标投影 (Radar ↔ Image 双向)
 │   └── calibration_io.py           #   标定结果 JSON 读写
 │
-├── trajectory/                     # ③ 轨迹处理层 — SQLite + 分析
+├── vision/                         # ④ 视觉检测层 — 目标检测数据
+│   ├── __init__.py
+│   ├── vision_models.py            #   VisionObject / VisionFrame 数据结构 + bbox 工具
+│   └── vision_loader.py            #   Vision JSON 加载解析
+│
+├── association/                    # ⑤ 雷达-视觉关联层 — Hungarian 匹配
+│   ├── __init__.py
+│   ├── association_models.py       #   Match / AssociationResult 数据结构
+│   ├── gating.py                   #   图像/BEV/类别 门控函数
+│   ├── cost_function.py            #   加权 BEV+像素 代价矩阵
+│   ├── hungarian_matcher.py        #   scipy.linear_sum_assignment 匈牙利匹配
+│   └── associator.py               #   完整匹配 Pipeline 编排
+│
+├── evaluation/                     # ⑥ 评估指标层 — 关联质量分析
+│   ├── __init__.py
+│   ├── eval_models.py              #   EvaluationResult / 距离分箱 / 车道 / 栅格模型
+│   ├── metrics.py                  #   recall/FP/BEV误差/百分位数/距离分箱/车道/栅格
+│   └── effective_range.py          #   有效感知区域 + 盲区多边形分析
+│
+├── trajectory/                     # ⑦ 轨迹处理层 — SQLite + 分析
 │   ├── __init__.py
 │   ├── trajectory_models.py        #   TrajectoryPoint, Trajectory 数据结构
 │   ├── trajectory_builder.py       #   从 Sync 数据构建轨迹
 │   ├── trajectory_filter.py        #   轨迹筛选 (短轨迹过滤、类别过滤)
 │   └── trajectory_db.py            #   SQLite 数据库 (带 dataset hash 缓存)
 │
-├── range_estimation/               # ④ 感知范围估计层
+├── range_estimation/               # ⑧ 感知范围估计层
 │   ├── __init__.py
 │   ├── point_filter.py             #   基础过滤 + DBSCAN 去噪
 │   ├── density_grid.py             #   栅格密度分析
 │   ├── contour_extractor.py        #   轮廓 → 多边形 + 面积计算
 │   └── range_estimator.py          #   完整 Pipeline (一键调用)
 │
-├── visualization/                  # ⑤ 可视化层 — 纯 OpenCV, 无 Qt 依赖
+├── visualization/                  # ⑨ 可视化层 — 纯 OpenCV, 无 Qt 依赖
 │   ├── __init__.py
 │   ├── color_map.py                #   颜色定义 (点对颜色、类别颜色)
-│   ├── image_overlay.py            #   图像叠加绘制 (雷达投影、匹配点)
-│   ├── bev_renderer.py             #   BEV 渲染 (帧/轨迹/范围多边形)
+│   ├── image_overlay.py            #   图像叠加 (雷达投影/bbox/匹配线)
+│   ├── bev_renderer.py             #   BEV 渲染 (帧/轨迹/vision BEV/有效区域)
 │   └── radar_drawer.py             #   高级雷达绘制工具
 │
-├── ui/                             # ⑥ UI 层 — PyQt6 交互组件
+├── ui/                             # ⑩ UI 层 — PyQt6 交互组件
 │   ├── __init__.py
-│   ├── image_view.py               #   图像视口 (点击交互、标注显示)
-│   ├── bev_view.py                 #   BEV 视口 (轨迹/标定点/栅格)
-│   └── operations.py               #   操作状态机 (点对/车道线/轨迹模式)
+│   ├── image_view.py               #   图像视口 (点击交互、标注显示、叠加图像)
+│   ├── bev_view.py                 #   BEV 视口 (轨迹/标定点/栅格/叠加BEV)
+│   └── operations.py               #   操作状态机 (点对/车道线/轨迹/关联模式)
 │
-├── export/                         # ⑦ 导出层
+├── export/                         # ⑪ 导出层
 │   ├── __init__.py
 │   └── json_exporter.py            #   JSON + 文本报告导出
 │
-├── tools/                          # ⑧ 工具
-│   └── generate_mock_dataset.py    #   模拟数据集生成器
+├── tools/                          # ⑫ 工具
+│   ├── generate_mock_dataset.py    #   模拟数据集生成器 (含 vision + association GT)
+│   ├── auto_test_association.py    #   自动化关联准确率测试
+│   └── auto_test_evaluation.py     #   自动化评估指标计算
 │
-├── tests/                          # ⑨ 测试
-│   ├── test_data.py                #   数据层测试 (30 cases)
-│   └── test_calibration.py         #   标定算法测试
+├── tests/                          # ⑬ 测试 (100 cases)
+│   ├── test_data.py                #   数据层测试
+│   ├── test_calibration.py         #   标定算法测试
+│   ├── test_camera_model.py        #   相机参数测试
+│   ├── test_vision_loader.py       #   视觉检测测试
+│   ├── test_association.py         #   雷达-视觉关联测试
+│   ├── test_evaluation.py          #   评估指标测试
+│   ├── test_effective_range.py     #   有效感知区域测试
+│   └── test_mock_dataset.py        #   模拟数据集测试
 │
-├── configs/
-│   └── default_config.yaml         #   默认参数配置
-│
-└── dataset/                        # 数据集 (不提交 git)
+└── assets/                         # 预览截图
 ```
 
 ---
@@ -130,21 +183,32 @@ graph TD
     A --> C[data/]
     A --> D[calibration/]
     A --> E[trajectory/]
+    A --> K[association/]
     B --> F[visualization/]
     B --> C
     B --> D
+    B --> K
     F --> C
     D --> C
     E --> C
+    K --> D
+    K --> L[vision/]
+    L --> C
+    M[evaluation/] --> K
+    M --> L
+    M --> D
+    N[camera/] --> D
     G[export/] --> D
     G --> C
     H[tools/] --> C
+    H --> K
+    H --> M
 ```
 
 ### 核心原则
 
-1. **分层解耦** — `data/` `calibration/` `trajectory/` `range_estimation/` 无 UI 依赖，可独立 import 和测试
-2. **两种模式分离** — 点对标定 (单帧操作) 与 轨迹回放 (全帧操作) 是完全独立的模式
+1. **分层解耦** — `data/` `calibration/` `trajectory/` `range_estimation/` `camera/` `vision/` `association/` `evaluation/` 无 UI 依赖，可独立 import 和测试
+2. **四种 UI 模式** — 点对标定 / 车道线标定 / 轨迹回放 / 雷达-视觉关联 完全独立
 3. **轨迹 DB 缓存** — 同一数据集不会重复加载，通过 dataset hash 判断
 4. **中文兼容** — 雷达 JSON 中文类别 (`机动车` `行人` `非机动车`) 自动映射为英文
 
@@ -182,6 +246,40 @@ graph TD
 ▶ Play → 回放轨迹动画
 ```
 
+### 3. 雷达-视觉关联模式 (Association Mode) 🆕
+
+```
+📐 Compute H → 先完成 Homography 标定
+     ↓
+🔗 Switch to Association Mode → 自动加载当前帧视觉检测
+     ↓
+图像叠加显示:
+  - 绿色 bbox = 视觉检测框
+  - 蓝色圆 = 雷达投影点
+  - 黄色线 = 匹配连线 + 代价值
+     ↓
+BEV 叠加显示:
+  - 圆形 = 雷达 BEV 点
+  - 菱形 = 视觉反投影 BEV 点
+     ↓
+状态栏: 匹配数 | 未匹配雷达 | 未匹配视觉
+     ↓
+滑动帧导航 → 自动刷新关联结果
+```
+
+### 4. CLI 自动化测试
+
+```bash
+# 生成带 GT 的模拟数据集
+python tools/generate_mock_dataset.py --output mock --num_frames 200
+
+# 关联准确率测试 (对比 GT)
+python tools/auto_test_association.py --dataset mock
+
+# 评估指标 + 有效感知区域
+python tools/auto_test_evaluation.py --dataset mock
+```
+
 ---
 
 ## 数据格式 / Data Formats
@@ -191,47 +289,76 @@ graph TD
 ```json
 {
   "sync_batch": 0,
-  "batch_size": 2,
-  "sensors": [
-    {"frame_index": 266339, "sensor_id": 1, "time_stamp": 1767954310202},
-    {"frame_index": 128723, "sensor_id": 2, "time_stamp": 1767954310202}
-  ],
+  "batch_size": 3,
+  "sensors": [...],
   "sensor_data": [
     {"channel_id": 0, "sensor_id": 1, "data_type": "image", "data_path": "image/xxx.jpg"},
-    {"channel_id": 1, "sensor_id": 2, "data_type": "radar", "data_path": "radar/xxx.json"}
+    {"channel_id": 1, "sensor_id": 2, "data_type": "radar", "data_path": "radar/xxx.json"},
+    {"channel_id": 2, "sensor_id": 3, "data_type": "vision_detection", "data_path": "vision/xxx.json"}
   ]
 }
 ```
 
-### Radar JSON (`radar/*.json`)
+### Vision JSON (`vision/*.vision.json`) 🆕
 
 ```json
 {
-  "baseId": 2,
+  "sensor_id": 3,
+  "frame_index": 0,
+  "time_stamp": 1700000000000,
+  "image_path": "image/xxx.jpg",
   "objects": [
-    {
-      "id": 42,
-      "class": "机动车",
-      "coord": [3.5, 42.0],
-      "props": {"speed": 15.0, "speedX": 0.1, "speedY": 14.9}
-    }
+    {"id": 1, "track_id": 10, "class": "vehicle", "bbox": [100, 200, 300, 400], "score": 0.92}
   ]
 }
 ```
 
-### Calibration Result JSON
+### Association GT (`association_gt/*.association_gt.json`) 🆕
 
 ```json
 {
-  "version": "1.0",
+  "frame_index": 0,
+  "num_radar": 3,
+  "num_vision": 4,
+  "matches": [
+    {"radar_idx": 0, "vision_idx": 1, "gt_id": 42}
+  ]
+}
+```
+
+### Enhanced Calibration JSON (v2.0) 🆕
+
+```json
+{
+  "version": "2.0",
   "calibration_type": "radar_to_camera_homography",
   "homography": [[...], [...], [...]],
   "inverse_homography": [[...], [...], [...]],
-  "matched_points": [
-    {"radar_point": {"x": 3.5, "y": 42.0}, "image_point": {"u": 640, "v": 400}}
+  "camera_parameters": {
+    "camera_matrix": [[fx,0,cx],[0,fy,cy],[0,0,1]],
+    "distortion_coefficients": [k1,k2,p1,p2,k3],
+    "image_size": {"width": 1920, "height": 1080}
+  },
+  "matched_points": [...],
+  "mean_reprojection_error": 2.34
+}
+```
+
+### Evaluation Results JSON 🆕
+
+```json
+{
+  "radar_recall": 0.85,
+  "radar_fp_rate": 0.15,
+  "mean_bev_error": 3.2,
+  "distance_bins": [
+    {"range_str": "0-30m", "recall": 0.95, "mean_bev_error": 1.5}
   ],
-  "mean_reprojection_error": 2.34,
-  "max_reprojection_error": 5.67
+  "effective_detection_area": {
+    "observed_cells": 120,
+    "effective_cells": 85,
+    "blind_zone_cells": 10
+  }
 }
 ```
 
@@ -287,6 +414,7 @@ print(f"Loaded {ds.num_frames} frames")
 # 获取当前帧数据
 img = ds.get_image()      # ImageFrame or None
 radar = ds.get_radar()    # RadarFrame or None
+vision = ds.get_vision()  # VisionFrame or None  🆕
 ```
 
 ### 计算标定
@@ -300,6 +428,40 @@ session.add_point(radar_x=3.5, radar_y=42.0, image_u=640, image_v=400)
 result = session.compute()
 print(f"Mean error: {result.mean_error:.2f} px")
 print(f"Homography:\n{result.H}")
+```
+
+### 雷达-视觉关联 🆕
+
+```python
+from association.associator import associate_radar_vision
+
+result = associate_radar_vision(radar_objects, vision_objects, H, H_inv)
+print(f"Matches: {result.num_matches}")
+print(f"Unmatched radar: {result.num_unmatched_radar}")
+
+for m in result.matches:
+    print(f"  R{m.radar_idx} ↔ V{m.vision_idx} (cost={m.cost:.3f})")
+```
+
+### 评估指标 🆕
+
+```python
+from evaluation.metrics import compute_association_metrics
+
+metrics = compute_association_metrics(result, radar_objs, vision_objs, H_inv)
+print(f"Recall: {metrics.radar_recall:.2%}")
+print(f"FP Rate: {metrics.radar_fp_rate:.2%}")
+print(f"Mean BEV Error: {metrics.mean_bev_error:.2f}m")
+```
+
+### 有效感知区域 🆕
+
+```python
+from evaluation.effective_range import compute_effective_detection_area
+
+area = compute_effective_detection_area(all_matches, all_vision, all_radar, H_inv)
+print(f"Effective cells: {area['stats']['effective_cells']}")
+print(f"Blind zone cells: {area['stats']['blind_zone_cells']}")
 ```
 
 ### 投影雷达到图像
@@ -348,9 +510,10 @@ result = estimate_radar_range(points)
 
 - **Python 3.10+**
 - **PyQt6** — UI framework
-- **OpenCV** — image processing, homography
+- **OpenCV** — image processing, homography, contour extraction
 - **NumPy** — numerical computation
 - **scikit-learn** — DBSCAN clustering
+- **SciPy** — Hungarian matching (linear_sum_assignment)
 - **SQLite** — trajectory database (built-in)
 
 ## License

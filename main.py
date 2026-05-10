@@ -179,9 +179,11 @@ class MainWindow(QMainWindow):
         self.radio_pair.setChecked(True)
         self.radio_lane = QRadioButton("Lane")
         self.radio_trajectory = QRadioButton("🔍 Trajectory")
+        self.radio_association = QRadioButton("🔗 Association")
         l3.addWidget(self.radio_pair)
         l3.addWidget(self.radio_lane)
         l3.addWidget(self.radio_trajectory)
+        l3.addWidget(self.radio_association)
         lay.addWidget(g3)
 
         # Actions
@@ -269,6 +271,7 @@ class MainWindow(QMainWindow):
 
         self.radio_pair.toggled.connect(self._onModeSwitch)
         self.radio_lane.toggled.connect(self._onModeSwitch)
+        self.radio_association.toggled.connect(self._onAssociationModeToggle)
         self.radio_trajectory.toggled.connect(self._onTrajectoryModeToggle)
 
         self.btn_undo.clicked.connect(self._onUndo)
@@ -374,6 +377,10 @@ class MainWindow(QMainWindow):
 
         # Redraw existing pairs for this batch
         self._redrawPairs()
+
+        # If in association mode, re-render association view
+        if self.ops.mode == AppMode.ASSOCIATION_VIEW:
+            self._renderAssociationView()
 
     # =========================================================================
     # Point Pair Mode
@@ -663,6 +670,126 @@ class MainWindow(QMainWindow):
             self._togglePlayback()
 
     # =========================================================================
+    # Association Mode
+    # =========================================================================
+    def _onAssociationModeToggle(self, checked: bool):
+        """Toggle association visualization mode."""
+        if checked:
+            self._enterAssociationMode()
+        else:
+            self._exitAssociationMode()
+
+    def _enterAssociationMode(self):
+        """Enter association mode: show vision bboxes + matching lines."""
+        if not self.dataset.dataset_root:
+            QMessageBox.warning(self, "Warning", "Please load dataset first")
+            self.radio_pair.setChecked(True)
+            return
+
+        if not self.calib_session.has_homography:
+            QMessageBox.warning(
+                self, "Warning",
+                "Homography not computed yet.\n"
+                "Please compute homography first (Point Pair → Compute H).\n\n"
+                "Or load a calibration JSON via Save/Load."
+            )
+            self.radio_pair.setChecked(True)
+            return
+
+        self.ops.mode = AppMode.ASSOCIATION_VIEW
+        self._updateModeUI()
+        self._renderAssociationView()
+
+    def _exitAssociationMode(self):
+        """Exit association mode and restore normal display."""
+        self._loadCurrentFrame()
+        self._updateModeUI()
+
+    def _renderAssociationView(self):
+        """Render the association visualization for the current frame."""
+        if self.ops.mode != AppMode.ASSOCIATION_VIEW:
+            return
+
+        import numpy as np
+        from calibration.projector import project_radar_to_image, project_image_to_radar
+        from visualization.image_overlay import (
+            draw_vision_bboxes, draw_association_lines, draw_projected_radar,
+        )
+        from visualization.bev_renderer import render_vision_bev_points
+
+        # Load data
+        img_frame = self.dataset.get_image()
+        radar_frame = self.dataset.get_radar()
+        vision_frame = self.dataset.get_vision()
+
+        if not img_frame or not radar_frame:
+            self.statusbar.showMessage("No image/radar data for this frame")
+            return
+
+        H = self.calib_session.H
+        H_inv = self.calib_session.H_inv
+        image = img_frame.image.copy()
+
+        # Draw radar projections on image
+        from visualization.image_overlay import draw_radar_on_image
+        image = draw_radar_on_image(image, radar_frame.objects, H)
+
+        if vision_frame and vision_frame.objects:
+            # Draw vision bboxes
+            image = draw_vision_bboxes(image, vision_frame.objects)
+
+            # Run association
+            from association.associator import associate_radar_vision
+            result = associate_radar_vision(
+                radar_frame.objects, vision_frame.objects, H, H_inv,
+            )
+
+            # Draw matching lines
+            if result.matches:
+                radar_bev = np.array(
+                    [[obj.x, obj.y] for obj in radar_frame.objects],
+                    dtype=np.float64,
+                )
+                radar_proj_uv = project_radar_to_image(radar_bev, H)
+                image = draw_association_lines(
+                    image, result.matches, radar_proj_uv,
+                    vision_frame.objects,
+                )
+
+            # Update image viewport
+            self.image_vp.setOverlayImage(image)
+
+            # BEV: show vision back-projected points
+            from vision.vision_models import extract_vision_bottom_centers
+            bottom_uv = extract_vision_bottom_centers(vision_frame.objects)
+            if len(bottom_uv) > 0:
+                vision_bev = project_image_to_radar(bottom_uv, H_inv)
+                bev_img = self.bev_vp.getCurrentBEVImage()
+                if bev_img is not None:
+                    bev_img = render_vision_bev_points(
+                        bev_img, vision_bev,
+                        self.bev_vp.x_range, self.bev_vp.y_range,
+                    )
+                    self.bev_vp.setOverlayImage(bev_img)
+
+            # Status bar with metrics
+            n_match = result.num_matches
+            n_radar = len(radar_frame.objects)
+            n_vision = len(vision_frame.objects)
+            self.statusbar.showMessage(
+                f"🔗 Association: {n_match} matches | "
+                f"Radar: {n_radar} | Vision: {n_vision} | "
+                f"Unmatched R: {result.num_unmatched_radar} | "
+                f"Unmatched V: {result.num_unmatched_vision}"
+            )
+        else:
+            # No vision data, just show radar projections
+            self.image_vp.setOverlayImage(image)
+            self.statusbar.showMessage(
+                "🔗 Association: No vision data for this frame"
+            )
+
+    # =========================================================================
     # Mode UI
     # =========================================================================
     def _updateModeUI(self):
@@ -674,6 +801,7 @@ class MainWindow(QMainWindow):
             AppMode.SELECT_IMAGE: ("📍 Click Image Point", UI_COLORS['radar_pending']),
             AppMode.LANE_START: ("🚗 Click Lane Start", UI_COLORS['lane']),
             AppMode.LANE_END: ("🚗 Click Lane End", UI_COLORS['lane']),
+            AppMode.ASSOCIATION_VIEW: ("🔗 Association View", "#006633"),
         }
 
         text, bg = mode_styles.get(mode, ("Ready", "#333"))
@@ -688,6 +816,7 @@ class MainWindow(QMainWindow):
             AppMode.SELECT_IMAGE: 'select_image',
             AppMode.LANE_START: 'lane_start',
             AppMode.LANE_END: 'lane_end',
+            AppMode.ASSOCIATION_VIEW: 'normal',
         }
         self.image_vp.setMode(image_mode_map.get(mode, 'normal'))
 

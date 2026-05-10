@@ -183,6 +183,32 @@ class ImageViewport(ZoomPanView):
         self.fitContent()
         return True
 
+    def setOverlayImage(self, cv_image):
+        """Display a pre-rendered OpenCV BGR image as the viewport content.
+
+        Used by association mode to show bboxes, matching lines, etc.
+
+        Args:
+            cv_image: OpenCV BGR image (numpy array).
+        """
+        import cv2
+        import numpy as np
+        from PyQt6.QtGui import QImage
+
+        if cv_image is None:
+            return
+
+        h, w = cv_image.shape[:2]
+        rgb = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+        qimg = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+        pix = QPixmap.fromImage(qimg)
+
+        if self._pixmap_item:
+            self._scene.removeItem(self._pixmap_item)
+        self._pixmap_item = QGraphicsPixmapItem(pix)
+        self._scene.addItem(self._pixmap_item)
+        self._scene.setSceneRect(self._pixmap_item.boundingRect())
+
     # --- Radar Projections ---
     def clearRadarMarkers(self):
         for item, _ in self._radar_markers:

@@ -135,3 +135,82 @@ def draw_radar_on_image(
     projected = project_radar_to_image(pts, H)
 
     return draw_projected_radar(image, radar_objects, projected, show_labels)
+
+
+def draw_vision_bboxes(
+    image: np.ndarray,
+    vision_objects,
+    color: tuple = (0, 200, 0),
+    thickness: int = 2,
+) -> np.ndarray:
+    """Draw vision detection bounding boxes on an image.
+
+    Args:
+        image: BGR image array.
+        vision_objects: List of VisionObject instances.
+        color: BGR color for bboxes.
+        thickness: Line thickness.
+
+    Returns:
+        Image with bboxes drawn.
+    """
+    img = image.copy()
+
+    for obj in vision_objects:
+        x1, y1, x2, y2 = int(obj.bbox[0]), int(obj.bbox[1]), int(obj.bbox[2]), int(obj.bbox[3])
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness, cv2.LINE_AA)
+
+        # Label with class and score
+        label = f"{obj.obj_class} {obj.score:.2f}"
+        cv2.putText(
+            img, label, (x1, y1 - 5),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1, cv2.LINE_AA,
+        )
+
+        # Draw bottom center marker
+        bc_u, bc_v = obj.bottom_center
+        cv2.circle(img, (int(bc_u), int(bc_v)), 3, (0, 255, 255), -1)
+
+    return img
+
+
+def draw_association_lines(
+    image: np.ndarray,
+    matches,
+    radar_proj_uv: np.ndarray,
+    vision_objects,
+    match_color: tuple = (255, 200, 0),
+    thickness: int = 2,
+) -> np.ndarray:
+    """Draw matching lines between radar projections and vision bbox centers.
+
+    Args:
+        image: BGR image array.
+        matches: List of Match instances.
+        radar_proj_uv: Nx2 array of radar projected [u, v] in image.
+        vision_objects: List of VisionObject instances.
+        match_color: BGR color for match lines.
+        thickness: Line thickness.
+
+    Returns:
+        Image with matching lines drawn.
+    """
+    img = image.copy()
+
+    for m in matches:
+        r_pt = (int(radar_proj_uv[m.radar_idx, 0]), int(radar_proj_uv[m.radar_idx, 1]))
+        v_bc = vision_objects[m.vision_idx].bottom_center
+        v_pt = (int(v_bc[0]), int(v_bc[1]))
+
+        cv2.line(img, r_pt, v_pt, match_color, thickness, cv2.LINE_AA)
+
+        # Draw cost label at midpoint
+        mid_x = (r_pt[0] + v_pt[0]) // 2
+        mid_y = (r_pt[1] + v_pt[1]) // 2
+        cv2.putText(
+            img, f"{m.cost:.2f}",
+            (mid_x, mid_y - 5),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.3, match_color, 1, cv2.LINE_AA,
+        )
+
+    return img

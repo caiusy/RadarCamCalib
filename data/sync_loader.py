@@ -120,6 +120,18 @@ def get_radar_items(sync_frame: SyncFrame) -> List[SensorDataItem]:
     return [sd for sd in sync_frame.sensor_data if sd.data_type == "radar"]
 
 
+def get_vision_items(sync_frame: SyncFrame) -> List[SensorDataItem]:
+    """Extract vision detection data items from a sync frame.
+
+    Args:
+        sync_frame: The sync frame to extract from.
+
+    Returns:
+        List of SensorDataItem with data_type == "vision_detection".
+    """
+    return [sd for sd in sync_frame.sensor_data if sd.data_type == "vision_detection"]
+
+
 def get_sensor_meta(sync_frame: SyncFrame, sensor_id: int) -> Optional[SensorMeta]:
     """Get sensor metadata by sensor_id.
 

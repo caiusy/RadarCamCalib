@@ -15,6 +15,7 @@ class AppMode(Enum):
     LANE_START = auto()        # Waiting for lane start point
     LANE_END = auto()          # Waiting for lane end point
     TRAJECTORY_VIEW = auto()   # Viewing radar trajectories
+    ASSOCIATION_VIEW = auto()  # Viewing radar-vision association
 
 
 @dataclass

@@ -259,3 +259,103 @@ def _draw_grid(
         (ego_px + 4, ego_py),
         (0, 120, 200), -1,
     )
+
+
+def render_vision_bev_points(
+    img: np.ndarray,
+    vision_bev_pts: np.ndarray,
+    x_range: Tuple[float, float],
+    y_range: Tuple[float, float],
+    color: Tuple[int, int, int] = (0, 200, 0),
+    radius: int = 4,
+) -> np.ndarray:
+    """Draw back-projected vision points on a BEV image.
+
+    Args:
+        img: BEV image to draw on (will be copied).
+        vision_bev_pts: Nx2 array of BEV [x, y] coordinates.
+        x_range, y_range: BEV coordinate ranges.
+        color: BGR color for the points.
+        radius: Point radius.
+
+    Returns:
+        Image with vision BEV points drawn.
+    """
+    result = img.copy()
+    h, w = result.shape[:2]
+
+    for pt in vision_bev_pts:
+        px, py = _bev_to_pixel(pt[0], pt[1], x_range, y_range, w, h)
+        if 0 <= px < w and 0 <= py < h:
+            cv2.drawMarker(
+                result, (px, py), color,
+                cv2.MARKER_DIAMOND, radius * 2, 2, cv2.LINE_AA,
+            )
+
+    return result
+
+
+def render_effective_zones(
+    img: np.ndarray,
+    zone_data: dict,
+    x_range: Tuple[float, float],
+    y_range: Tuple[float, float],
+) -> np.ndarray:
+    """Draw effective and blind zone polygons on a BEV image.
+
+    Uses the output of compute_effective_detection_area.
+
+    Args:
+        img: BEV image to draw on (will be copied).
+        zone_data: Dict with keys 'radar_effective_detection_polygon',
+            'radar_blind_zone_polygon', 'radar_observed_coverage_polygon'.
+        x_range, y_range: BEV coordinate ranges.
+
+    Returns:
+        Image with zone polygons drawn.
+    """
+    result = img.copy()
+    h, w = result.shape[:2]
+
+    # Effective zone — green, semi-transparent
+    _draw_zone_polygons(
+        result,
+        zone_data.get("radar_effective_detection_polygon", []),
+        x_range, y_range, w, h,
+        color=(0, 180, 0), alpha=0.2,
+    )
+
+    # Blind zone — red, semi-transparent
+    _draw_zone_polygons(
+        result,
+        zone_data.get("radar_blind_zone_polygon", []),
+        x_range, y_range, w, h,
+        color=(0, 0, 200), alpha=0.3,
+    )
+
+    return result
+
+
+def _draw_zone_polygons(
+    img: np.ndarray,
+    polygons: list,
+    x_range, y_range, w, h,
+    color, alpha,
+):
+    """Draw zone polygons with semi-transparent fill."""
+    for poly_vertices in polygons:
+        if len(poly_vertices) < 3:
+            continue
+
+        pts_px = []
+        for vertex in poly_vertices:
+            vx, vy = vertex[0], vertex[1]
+            px, py = _bev_to_pixel(vx, vy, x_range, y_range, w, h)
+            pts_px.append([px, py])
+
+        pts_arr = np.array(pts_px, dtype=np.int32)
+
+        overlay = img.copy()
+        cv2.fillPoly(overlay, [pts_arr], color)
+        cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
+        cv2.polylines(img, [pts_arr], True, color, 1, cv2.LINE_AA)

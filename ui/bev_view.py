@@ -86,8 +86,89 @@ class BEVViewport(QGraphicsView):
         self._trajectory_mode = False
         self._highlighted_items: List = []
         self._range_items: List = []         # 范围多边形
+        self._overlay_pixmap: Optional = None  # Overlay pixmap item
 
         self._drawGrid()
+
+    @property
+    def x_range(self) -> Tuple[float, float]:
+        """BEV X axis range in meters."""
+        return self.X_RANGE
+
+    @property
+    def y_range(self) -> Tuple[float, float]:
+        """BEV Y axis range in meters."""
+        return self.Y_RANGE
+
+    def getCurrentBEVImage(self):
+        """Render current BEV scene to an OpenCV image.
+
+        Returns:
+            BGR numpy array of the current BEV, or None.
+        """
+        try:
+            import numpy as np
+            from visualization.bev_renderer import render_bev_frame
+
+            # Collect current radar objects from markers
+            radar_objects = []
+            from data.data_models import RadarObject
+            for marker, target in self._radar_markers:
+                radar_objects.append(RadarObject(
+                    track_id=target.get('id', 0),
+                    obj_class=target.get('class', 'unknown'),
+                    x=target.get('x', 0),
+                    y=target.get('y', 0),
+                ))
+
+            return render_bev_frame(
+                radar_objects,
+                x_range=self.X_RANGE,
+                y_range=self.Y_RANGE,
+                img_size=(600, 800),
+            )
+        except Exception as e:
+            print(f"[BEV] getCurrentBEVImage error: {e}")
+            return None
+
+    def setOverlayImage(self, cv_image):
+        """Display a pre-rendered OpenCV BGR image as an overlay on the BEV.
+
+        Used by association mode to show vision BEV points.
+
+        Args:
+            cv_image: OpenCV BGR image (numpy array).
+        """
+        try:
+            import cv2
+            import numpy as np
+            from PyQt6.QtGui import QImage, QPixmap
+            from PyQt6.QtWidgets import QGraphicsPixmapItem
+
+            if cv_image is None:
+                return
+
+            # Remove previous overlay
+            if self._overlay_pixmap and self._overlay_pixmap.scene():
+                self._scene.removeItem(self._overlay_pixmap)
+
+            h, w = cv_image.shape[:2]
+            rgb = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+            qimg = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+            pix = QPixmap.fromImage(qimg)
+
+            # Scale pixmap to match BEV scene
+            scaled_pix = pix.scaled(
+                self.BEV_WIDTH, self.BEV_HEIGHT,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._overlay_pixmap = QGraphicsPixmapItem(scaled_pix)
+            self._overlay_pixmap.setZValue(1)  # Above grid, below markers
+            self._overlay_pixmap.setOpacity(0.7)
+            self._scene.addItem(self._overlay_pixmap)
+        except Exception as e:
+            print(f"[BEV] setOverlayImage error: {e}")
 
     # =========================================================================
     # 坐标转换
