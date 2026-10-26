@@ -59,6 +59,8 @@ class CalibrationApp:
         root_path = Path(root).expanduser().resolve()
         dataset = WorkbenchDataset(root_path, sync_folder=sync_folder, camera_tracks=camera_tracks, video=video)
         with self.lock:
+            if self.dataset is not None:
+                self.dataset.close()
             self.dataset = dataset
             self.dataset_root = root_path
             self.current_index = dataset.current_index
