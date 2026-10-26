@@ -20,6 +20,7 @@ outputs/
 *.pid
 app.log
 crash.log
+.coverage
 
 # IDE
 .vscode/
