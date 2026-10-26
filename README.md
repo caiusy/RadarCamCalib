@@ -84,6 +84,20 @@ python tools/fit_esmeot_time.py /path/to/es_meot --camera-fps 20 \
   --output outputs/esmeot_time_sync.json
 ```
 
+从 ES-MEOT 原始 `config` 派生地面平面 Homography：
+
+```bash
+python tools/build_esmeot_homography.py /path/to/es_meot/config \
+  --ground-height MEASURED_ROAD_Y_IN_METRES \
+  --output outputs/esmeot_calibration.json
+```
+
+这是由 `K、R、T` 推导的物理初值，使用前必须用留出点对或轨迹残差验证；
+它不会把“由配置推导”标成“人工标定已验证”。
+路面高度必须来自测量或独立拟合；零平移且路面设为 `y=0` 会让平面经过
+相机光心，无法反投影，工具会拒绝这种退化配置。派生 Homography 作用于
+去畸变像素；原始像素必须先用同一个 K/D 去畸变。
+
 该命令只拟合帧时钟映射，不会伪造硬件触发延迟，也不会把数据写入仓库。
 `generate_mock_dataset.py` 现在会稳定导出有效的 `mock_matched_points.json`；
 导出的点对只来自模拟真值，不代表真实 ES-MEOT 标定结果。

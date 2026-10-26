@@ -92,7 +92,8 @@ class ESMeotDataset:
         points = np.asarray(points_xyz, dtype=float).reshape(-1, 3)
         R = np.asarray(params["radar_to_camera_rotation"], dtype=float)
         T = np.asarray(params["radar_to_camera_translation"], dtype=float)
-        camera_points = (R @ points.T).T + T
+        # The upstream Space2Plane config stores a translation BEFORE rotation.
+        camera_points = (points + T) @ R.T
         positive = camera_points[:, 2] > 1e-9
         result = np.full((len(points), 2), np.nan, dtype=float)
         K = np.asarray(params["camera_matrix"], dtype=float)
