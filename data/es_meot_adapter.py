@@ -85,3 +85,22 @@ class ESMeotDataset:
                 "ground_plane": ["x", "z"],
             },
         }
+
+    def project_radar_to_image(self, points_xyz: np.ndarray) -> np.ndarray:
+        """Project ES-MEOT radar XYZ points using the dataset K/D/R/T."""
+        params = self.camera_parameters()
+        points = np.asarray(points_xyz, dtype=float).reshape(-1, 3)
+        R = np.asarray(params["radar_to_camera_rotation"], dtype=float)
+        T = np.asarray(params["radar_to_camera_translation"], dtype=float)
+        camera_points = (R @ points.T).T + T
+        positive = camera_points[:, 2] > 1e-9
+        result = np.full((len(points), 2), np.nan, dtype=float)
+        K = np.asarray(params["camera_matrix"], dtype=float)
+        D = np.asarray(params["distortion_coefficients"], dtype=float)
+        if np.any(positive):
+            import cv2
+            projected, _ = cv2.projectPoints(
+                camera_points[positive], np.zeros(3), np.zeros(3), K, D
+            )
+            result[positive] = projected.reshape(-1, 2)
+        return result
