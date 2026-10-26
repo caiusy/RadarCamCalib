@@ -95,17 +95,20 @@ python tools/build_esmeot_homography.py /path/to/es_meot/config \
 这是由 `K、R、T` 推导的物理初值，使用前必须用留出点对或轨迹残差验证；
 它不会把“由配置推导”标成“人工标定已验证”。
 
-如果数据同时提供 `annotation.npy` 和可信的 ByteTrack 检测，可用配对的
-相机轨迹底边中心拟合一个可运行的平面映射，并自动保留时间留出误差：
+实际 ES-MEOT 路面是倾斜的。可只用原始雷达 XYZ 和相机 ByteTrack 框，
+通过配置的 XYZ 投影建立无歧义候选点对，再拟合有效平面映射：
 
 ```bash
-python tools/fit_esmeot_pairs.py /path/to/es_meot \
+python tools/fit_esmeot_native.py /path/to/es_meot \
   --camera-tracks /path/to/output-keypoints-ByteTrack.npy \
-  --output outputs/esmeot_pair_fit.json
+  --output outputs/esmeot_native_fit.json
 ```
 
-该结果明确标注为 `pair-fit`；ES-MEOT 的 annotation 是上游派生数据，留出
-误差用于检查时序泛化，不能替代独立人工点对或实测外参。
+此命令不读取 annotation 或 CATS；只用前半序列拟合，后半序列中未出现在
+训练集的相机 ID 用于留出验证。输出像素/米误差、点对来源和限制，原始框使用
+`(x1,y1,x2,y2)`。结果是 operational fit，雷达中心与车辆底边存在尺寸偏差，
+自动点对残差不等价于独立人工标定精度。
+
 路面高度必须来自测量或独立拟合；零平移且路面设为 `y=0` 会让平面经过
 相机光心，无法反投影，工具会拒绝这种退化配置。派生 Homography 作用于
 去畸变像素；原始像素必须先用同一个 K/D 去畸变。
