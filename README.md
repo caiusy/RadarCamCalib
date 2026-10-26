@@ -11,7 +11,7 @@ and effective detection area analysis.
 
 | 点对标定 + BEV | 轨迹回放 |
 |:---:|:---:|
-| ![browser workbench](assets/preview_v3.png) | ![playback](assets/playback_preview.png) |
+| ![browser workbench](assets/web_workbench.png) | ![playback](assets/playback_preview.png) |
 
 上方为标定工作台和轨迹回放示例。实际页面由浏览器 Canvas 渲染，不代表 ES-MEOT 留出标定结果。
 
