@@ -3,7 +3,7 @@
 
 > Author: **caiusy**
 
-A modular Python/PyQt6/OpenCV toolkit for radar-camera calibration, BEV visualization,
+A modular Python/OpenCV toolkit with a lightweight local web workbench for radar-camera calibration, BEV visualization,
 trajectory analysis, vision detection fusion, radar-vision association, evaluation metrics,
 and effective detection area analysis.
 
@@ -11,9 +11,42 @@ and effective detection area analysis.
 
 | 点对标定 + BEV | 轨迹回放 |
 |:---:|:---:|
-| ![preview](assets/preview_v3.png) | ![playback](assets/playback_preview.png) |
+| ![browser workbench](assets/preview_v3.png) | ![playback](assets/playback_preview.png) |
 
-上方为已有 GUI 示例截图，展示点对操作和轨迹回放界面，不代表 ES-MEOT 留出标定结果。
+上方为标定工作台和轨迹回放示例。实际页面由浏览器 Canvas 渲染，不代表 ES-MEOT 留出标定结果。
+
+### 轻量 Web 工作台
+
+标定仓库已移除 PyQt6。`server.py` 使用 Python 标准库提供本地 JSON API，
+`web/index.html` 是零构建依赖的浏览器界面；原有 `calibration/`、`association/`、
+`evaluation/` 和 `range_estimation/` 算法层继续复用。当前帧在服务端按需读取，
+数据集不会复制进仓库或上传到 Git。
+
+```bash
+pip install -r requirements.txt
+python main.py --host 127.0.0.1 --port 8765
+```
+
+如果直接启动时已知 ES-MEOT 文件，可附带可信 ByteTrack 和视频路径；也可以在页面左侧填写：
+
+```bash
+python main.py --host 127.0.0.1 --port 8765 \
+  --dataset-root /home/caius/datasets/es-meot \
+  --camera-tracks /home/caius/datasets/es-meot/output-keypoints-ByteTrack.npy \
+  --video /home/caius/datasets/es-meot/video.mp4
+```
+
+远程 WSL 使用 SSH 隧道访问：
+
+```bash
+ssh -N -L 8765:127.0.0.1:8765 caius-wsl
+# 浏览器打开 http://127.0.0.1:8765
+```
+
+在页面左侧输入远程服务器上的数据集目录；同步数据使用 `sync/`，ES-MEOT 原生数据
+可由 `data/workbench_dataset.py` 读取 `radarTrack.npy` 和视频帧。交互步骤是：
+BEV 点击雷达目标 → 相机点击对应底边中心 → 计算 Homography → 检查误差 → 导出 JSON。
+左/右方向键可逐帧回放，`分析窗口` 会输出轨迹、关联指标和有效覆盖分析。
 
 ### ES-MEOT 标定流程
 
@@ -60,10 +93,10 @@ and effective detection area analysis.
 pip install -r requirements.txt
 ```
 
-### 运行主程序
+### 运行 Web 工作台
 
 ```bash
-python main.py
+python main.py --host 127.0.0.1 --port 8765
 ```
 
 ### 生成模拟数据 (含视觉检测和关联 GT)
@@ -142,7 +175,9 @@ python tools/fit_esmeot_native.py /path/to/es_meot \
 ```
 RadarCamCalib/
 │
-├── main.py                         # 程序入口 (PyQt6 MainWindow)
+├── main.py                         # Web 工作台入口
+├── server.py                        # 标准库 HTTP + JSON API
+├── web/index.html                   # 零构建依赖的 Canvas 界面
 ├── requirements.txt                # Python 依赖
 ├── README.md
 │
@@ -152,7 +187,9 @@ RadarCamCalib/
 │   ├── sync_loader.py              #   同步 JSON 解析器 (含 vision 支持)
 │   ├── radar_loader.py             #   雷达 JSON 解析 + 中→英类别映射
 │   ├── image_loader.py             #   图像加载 (OpenCV)
-│   └── sync_dataset.py             #   数据集封装 (帧导航 + 按需加载 + vision)
+│   ├── sync_dataset.py             #   同步数据集封装
+│   ├── workbench_dataset.py         #   Web 工作台适配同步/ES-MEOT 数据
+│   └── es_meot_adapter.py           #   ES-MEOT NPY/config 读取
 │
 ├── camera/                         # ② 相机参数层 — 内参/外参管理
 │   ├── __init__.py
@@ -206,10 +243,7 @@ RadarCamCalib/
 │   ├── bev_renderer.py             #   BEV 渲染 (帧/轨迹/vision BEV/有效区域)
 │   └── radar_drawer.py             #   高级雷达绘制工具
 │
-├── ui/                             # ⑩ UI 层 — PyQt6 交互组件
-│   ├── __init__.py
-│   ├── image_view.py               #   图像视口 (点击交互、标注显示、叠加图像)
-│   ├── bev_view.py                 #   BEV 视口 (轨迹/标定点/栅格/叠加BEV)
+├── ui/                             # ⑩ 兼容层 — 纯业务状态机
 │   └── operations.py               #   操作状态机 (点对/车道线/轨迹/关联模式)
 │
 ├── export/                         # ⑪ 导出层
@@ -242,16 +276,17 @@ RadarCamCalib/
 
 ```mermaid
 graph TD
-    A[main.py] --> B[ui/]
-    A --> C[data/]
-    A --> D[calibration/]
-    A --> E[trajectory/]
+    A[main.py] --> B[server.py]
+    B --> W[web/index.html]
+    B --> X[data/workbench_dataset.py]
+    B --> C[data/]
+    B --> D[calibration/]
+    B --> E[trajectory/]
     A --> K[association/]
-    B --> F[visualization/]
     B --> C
     B --> D
     B --> K
-    F --> C
+    W --> C
     D --> C
     E --> C
     K --> D
@@ -270,8 +305,8 @@ graph TD
 
 ### 核心原则
 
-1. **分层解耦** — `data/` `calibration/` `trajectory/` `range_estimation/` `camera/` `vision/` `association/` `evaluation/` 无 UI 依赖，可独立 import 和测试
-2. **四种 UI 模式** — 点对标定 / 车道线标定 / 轨迹回放 / 雷达-视觉关联 完全独立
+1. **分层解耦** — `data/` `calibration/` `trajectory/` `range_estimation/` `camera/` `vision/` `association/` `evaluation/` 无界面依赖，可独立 import 和测试
+2. **浏览器工作流** — 点对标定 / 轨迹回放 / 雷达-视觉关联通过 Canvas 和 JSON API 完成
 3. **轨迹 DB 缓存** — 同一数据集不会重复加载，通过 dataset hash 判断
 4. **中文兼容** — 雷达 JSON 中文类别 (`机动车` `行人` `非机动车`) 自动映射为英文
 
@@ -445,14 +480,14 @@ python tools/auto_test_evaluation.py --dataset mock
 ### 添加新的可视化
 
 1. 在 `visualization/` 中创建新的 renderer
-2. 纯 OpenCV 实现，不依赖 Qt
-3. 在 `ui/` 中创建对应的 Qt widget 调用 renderer
+2. 纯 OpenCV 或 Canvas 实现，不依赖桌面 UI 工具包
+3. 在 `web/index.html` 中添加图层，并通过 `server.py` 提供数据
 
 ### 添加新的 UI 模式
 
-1. 在 `ui/operations.py` 的 `AppMode` 枚举中添加新模式
-2. 在 `OperationsController` 中添加状态转换逻辑
-3. 在 `main.py` 中添加对应的信号处理和 UI 更新
+1. 在 `web/index.html` 中添加工具状态和 Canvas 交互
+2. 在 `server.py` 中增加一个小型 JSON API
+3. 保持算法层不感知界面
 
 ### 替换轨迹存储后端
 
@@ -572,7 +607,8 @@ result = estimate_radar_range(points)
 ## 技术栈 / Tech Stack
 
 - **Python 3.10+**
-- **PyQt6** — UI framework
+- **Python 标准库 HTTP** — 轻量本地服务
+- **HTML Canvas** — 浏览器可视化与点选
 - **OpenCV** — image processing, homography, contour extraction
 - **NumPy** — numerical computation
 - **scikit-learn** — DBSCAN clustering

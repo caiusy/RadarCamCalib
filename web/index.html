@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RadarCamCalib · Signal Workbench</title>
+  <style>
+    :root { --ink:#eef2f4; --muted:#8c9aa3; --line:#27323a; --panel:#11191f; --panel2:#17232a; --bg:#091015; --hot:#ff7048; --cyan:#66e3d0; --lime:#c5f276; --yellow:#ffd166; }
+    * { box-sizing:border-box } body { margin:0; min-width:1120px; background:radial-gradient(circle at 80% -10%,#20353a 0,#0b151b 38%,#080d12 80%); color:var(--ink); font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    body:before { content:""; position:fixed; inset:0; pointer-events:none; opacity:.11; background-image:linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px); background-size:36px 36px; mask-image:linear-gradient(to bottom,black,transparent 90%); }
+    header { height:74px; display:flex; align-items:center; justify-content:space-between; padding:0 28px; border-bottom:1px solid var(--line); background:rgba(9,16,21,.88); position:sticky; top:0; z-index:5; backdrop-filter:blur(18px); }
+    .brand { display:flex; align-items:center; gap:13px; letter-spacing:.04em; } .mark { width:35px; height:35px; border:1px solid var(--cyan); border-radius:50%; position:relative; box-shadow:0 0 25px #66e3d044; } .mark:after { content:""; position:absolute; width:7px;height:7px;border-radius:50%; background:var(--hot); top:7px;left:15px; box-shadow:0 0 15px var(--hot); } .brand b { font:600 18px Georgia,serif; letter-spacing:.02em; } .brand small { display:block;color:var(--muted);font-size:10px;margin-top:2px; }
+    .top-status { display:flex;align-items:center;gap:10px;color:var(--muted); } .dot { width:8px;height:8px;border-radius:50%;background:var(--lime);box-shadow:0 0 12px var(--lime); } .kbd { color:#dbe6e8;border:1px solid #3b4b54;background:#17232a;padding:3px 6px;border-radius:3px; }
+    main { display:grid; grid-template-columns:252px minmax(560px,1fr) 270px; gap:15px; padding:18px 20px 26px; max-width:1800px; margin:auto; }
+    aside,.panel { background:linear-gradient(145deg,rgba(22,33,41,.93),rgba(12,19,24,.96)); border:1px solid var(--line); border-radius:11px; box-shadow:0 20px 60px #0005; }
+    aside { padding:16px; align-self:start; } .eyebrow { color:var(--cyan);font-size:10px;letter-spacing:.17em;text-transform:uppercase; } h2 { margin:5px 0 18px;font:600 23px/1.05 Georgia,serif; } h3 { margin:0 0 10px;font-size:12px;color:#dce8e8;letter-spacing:.08em; } label { display:block;color:var(--muted);font-size:10px;margin:12px 0 5px; } input { width:100%; background:#0a1116;border:1px solid #30404a;color:var(--ink);border-radius:5px;padding:9px 10px;font:inherit;outline:none; } input:focus { border-color:var(--cyan); box-shadow:0 0 0 3px #66e3d014; } button { cursor:pointer;border:1px solid #3b5058;background:#1b2a31;color:var(--ink);border-radius:5px;padding:9px 10px;font:600 11px inherit;transition:.16s ease; } button:hover { transform:translateY(-1px);border-color:var(--cyan);background:#203a3d; } button.primary { background:var(--hot); color:#1d120e;border-color:var(--hot); } button.ghost { background:transparent; } .row { display:flex;gap:7px; } .row>* { flex:1; } .divider { height:1px;background:var(--line);margin:18px 0; } .hint { color:var(--muted);font-size:10px;margin:12px 0 0; }
+    .workspace { min-width:0; } .hero { padding:3px 3px 15px; display:flex;justify-content:space-between;align-items:end; } .hero h1 { margin:0;font:500 26px Georgia,serif;letter-spacing:-.02em; } .hero p { margin:4px 0 0;color:var(--muted);font-size:11px; } .frame-readout { color:var(--yellow);font-size:12px; }
+    .views { display:grid;grid-template-columns:1fr 1fr;gap:12px; } .panel { overflow:hidden; } .panel-head { padding:11px 13px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center; } .panel-head span { color:var(--muted);font-size:10px; } canvas { width:100%;display:block;background:#071017;cursor:crosshair; } #imageCanvas { aspect-ratio:16/9; } #bevCanvas { aspect-ratio:1/1;cursor:default; } .legend { display:flex;gap:12px;padding:9px 13px;color:var(--muted);font-size:10px; } .legend i { display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px; } .telemetry { margin-top:12px;padding:13px;border-radius:10px;background:#0d171c;border:1px solid var(--line);min-height:60px;color:var(--muted);font-size:11px; }
+    .metrics { display:grid;gap:10px; } .metric { padding:13px;border:1px solid var(--line);border-radius:8px;background:#0c151b;position:relative;overflow:hidden; } .metric:before { content:"";position:absolute;top:0;left:0;right:0;height:2px;background:var(--cyan); } .metric.hot:before { background:var(--hot); } .metric b { display:block;font-size:23px;font-weight:400;color:var(--ink);margin-top:3px; } .metric span { color:var(--muted);font-size:10px; } .matrix { margin-top:14px;overflow:auto;max-height:190px;border:1px solid var(--line);border-radius:6px; } table { border-collapse:collapse;width:100%;font-size:10px; } th,td { padding:7px 8px;border-bottom:1px solid #203039;text-align:left;white-space:nowrap; } th { color:var(--cyan);font-weight:400;position:sticky;top:0;background:#101b20; } .empty { color:var(--muted);padding:18px;text-align:center;font-size:11px; } .log { margin-top:13px;color:var(--muted);font-size:10px;min-height:35px; }
+    .progress { height:3px;background:#1f2d33;border-radius:5px;overflow:hidden;margin-top:10px; } .progress i { display:block;height:100%;width:0;background:linear-gradient(90deg,var(--hot),var(--yellow));transition:width .25s; }
+    @media(max-width:1200px){ body{min-width:900px} main{grid-template-columns:220px minmax(480px,1fr) 230px;gap:10px;padding:12px} }
+  </style>
+</head>
+<body>
+<header><div class="brand"><div class="mark"></div><div><b>RadarCamCalib</b><small>FIELD CALIBRATION / WEB WORKBENCH 02</small></div></div><div class="top-status"><span class="dot"></span><span id="serviceStatus">LOCAL SERVICE READY</span><span class="kbd">SSH TUNNEL</span></div></header>
+<main>
+  <aside>
+    <div class="eyebrow">01 / workspace</div><h2>数据入口</h2>
+    <label for="dataset">数据集目录</label><input id="dataset" placeholder="/home/caius/datasets/scene" />
+    <label for="syncFolder">同步目录</label><input id="syncFolder" value="sync" />
+    <label for="cameraTracks">ES-MEOT ByteTrack NPY（可选）</label><input id="cameraTracks" placeholder="/home/caius/.../output-keypoints-ByteTrack.npy" />
+    <label for="videoPath">ES-MEOT 视频（可选）</label><input id="videoPath" placeholder="/home/caius/.../video.mp4" />
+    <button class="primary" id="loadBtn" style="width:100%;margin-top:12px">加载当前数据集</button>
+    <p class="hint">数据留在运行服务器。浏览器只请求当前帧。</p>
+    <div class="divider"></div><div class="eyebrow">02 / point pairs</div><h3>空间标定</h3>
+    <button id="pairBtn" style="width:100%">开始点对选择</button>
+    <div class="row" style="margin-top:7px"><button id="clearBtn" class="ghost">清除点对</button><button id="importBtn" class="ghost">导入 JSON</button></div>
+    <input type="file" id="fileInput" accept=".json" hidden>
+    <label for="threshold">RANSAC 阈值 / px</label><input id="threshold" value="5" type="number" step="0.5" min="0.5">
+    <button id="computeBtn" class="primary" style="width:100%;margin-top:12px">计算 Homography</button>
+    <button id="exportBtn" class="ghost" style="width:100%;margin-top:7px">导出标定 JSON</button>
+    <div class="divider"></div><div class="eyebrow">03 / analysis</div><h3>轨迹与覆盖</h3>
+    <div class="row"><input id="startFrame" type="number" value="0" min="0"><input id="endFrame" type="number" placeholder="末帧"><input id="stepFrame" type="number" value="1" min="1"></div>
+    <button id="analyzeBtn" style="width:100%;margin-top:9px">分析窗口</button>
+    <p id="log" class="log">等待数据集。快捷键 ← / → 回放帧。</p>
+  </aside>
+  <section class="workspace">
+    <div class="hero"><div><h1>Calibration cockpit</h1><p>Radar ↔ camera geometry, synchronized one frame at a time.</p></div><div class="frame-readout" id="frameReadout">FRAME — / —</div></div>
+    <div class="views">
+      <div class="panel"><div class="panel-head"><b>CAMERA / RAW PIXELS</b><span id="imageMeta">no image</span></div><canvas id="imageCanvas" width="1280" height="720"></canvas><div class="legend"><span><i style="background:var(--hot)"></i>radar projection</span><span><i style="background:var(--cyan)"></i>vision bbox</span><span><i style="background:var(--yellow)"></i>matched point</span></div></div>
+      <div class="panel"><div class="panel-head"><b>RADAR / BEV PLANE</b><span>x lateral · y forward</span></div><canvas id="bevCanvas" width="640" height="640"></canvas><div class="legend"><span><i style="background:var(--hot)"></i>radar tracks</span><span><i style="background:var(--lime)"></i>pair candidates</span></div></div>
+    </div>
+    <div class="telemetry" id="telemetry">Load a synchronized dataset to inspect radar objects and camera detections.</div>
+  </section>
+  <aside>
+    <div class="eyebrow">live / diagnostics</div><h2>质量门</h2>
+    <div class="metrics"><div class="metric hot"><span>POINT PAIRS</span><b id="pairCount">0</b><div class="progress"><i id="pairProgress"></i></div></div><div class="metric"><span>INLIERS</span><b id="inlierCount">—</b></div><div class="metric"><span>MEAN ERROR / PIXEL</span><b id="meanError">—</b></div><div class="metric"><span>MAX ERROR / PIXEL</span><b id="maxError">—</b></div></div>
+    <div class="divider"></div><div class="eyebrow">pair register</div><div class="matrix" id="pairTable"><div class="empty">No pairs yet</div></div>
+  </aside>
+</main>
+<script>
+const $=id=>document.getElementById(id), imageCanvas=$('imageCanvas'), bevCanvas=$('bevCanvas'), ix=imageCanvas.getContext('2d'), bx=bevCanvas.getContext('2d');
+let state={frame:{radar:[],vision:[],points:[]},points:[],calibration:{},pairMode:false,pending:null};
+const log=(s,err=false)=>{$('log').textContent=s;$('log').style.color=err?'#ff9476':'var(--muted)'};
+async function api(path, opts={}){const r=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});const d=await r.json();if(!r.ok)throw Error(d.error||r.statusText);return d}
+function frameData(d){state=d; const f=d.frame||{}; $('frameReadout').textContent=`FRAME ${f.index<0?'—':String(f.index+1).padStart(4,'0')} / ${f.total||'—'}`; $('pairCount').textContent=d.points.length; $('pairProgress').style.width=Math.min(100,d.points.length/8*100)+'%'; $('inlierCount').textContent=d.calibration.ready?d.calibration.inliers:'—'; $('meanError').textContent=d.calibration.mean_error==null?'—':d.calibration.mean_error.toFixed(2); $('maxError').textContent=d.calibration.max_error==null?'—':d.calibration.max_error.toFixed(2); $('serviceStatus').textContent=d.dataset_root?'DATASET MOUNTED':'LOCAL SERVICE READY'; drawImage(f);drawBev(f);drawPairs(d.points); }
+function drawImage(f){const W=imageCanvas.width,H=imageCanvas.height;ix.fillStyle='#071017';ix.fillRect(0,0,W,H); if(f.image?.data){const im=new Image();im.onload=()=>{ix.drawImage(im,0,0,W,H);overlayImage(f)};im.src=f.image.data}else{ix.fillStyle='#8c9aa3';ix.fillText('NO CAMERA FRAME',W/2-60,H/2)} $('imageMeta').textContent=f.image?`${f.image.width} × ${f.image.height}`:'no image';}
+function overlayImage(f){const sx=imageCanvas.width/(f.image?.width||imageCanvas.width),sy=imageCanvas.height/(f.image?.height||imageCanvas.height); f.radar.forEach((r,i)=>{if(!r.projected)return;const [u,v]=r.projected;ix.strokeStyle='#ff7048';ix.lineWidth=2;ix.beginPath();ix.arc(u*sx,v*sy,6,0,Math.PI*2);ix.stroke();ix.fillStyle='#ff7048';ix.fillText('#'+r.id,u*sx+8,v*sy-7)}); f.vision.forEach(v=>{const [x1,y1,x2,y2]=v.bbox;ix.strokeStyle='#66e3d0';ix.lineWidth=1.5;ix.strokeRect(x1*sx,y1*sy,(x2-x1)*sx,(y2-y1)*sy);}); f.points.forEach(p=>{const u=p.image_point.u*sx,v=p.image_point.v*sy;ix.fillStyle='#ffd166';ix.beginPath();ix.arc(u,v,5,0,Math.PI*2);ix.fill();});}
+function drawBev(f){const W=bevCanvas.width,H=bevCanvas.height;bx.fillStyle='#071017';bx.fillRect(0,0,W,H);bx.strokeStyle='#1e3039';bx.lineWidth=1;for(let x=0;x<=W;x+=64){bx.beginPath();bx.moveTo(x,0);bx.lineTo(x,H);bx.stroke()}for(let y=0;y<=H;y+=64){bx.beginPath();bx.moveTo(0,y);bx.lineTo(W,y);bx.stroke()} const xMin=-30,xMax=30,yMin=0,yMax=120; const cv=(x,y)=>[(x-xMin)/(xMax-xMin)*W,H-(y-yMin)/(yMax-yMin)*H]; f.radar.forEach(r=>{const [x,y]=cv(r.x,r.y);bx.fillStyle='#ff7048';bx.beginPath();bx.arc(x,y,5,0,Math.PI*2);bx.fill();bx.fillStyle='#9aaab0';bx.font='11px ui-monospace';bx.fillText('#'+r.id,x+8,y-6)}); bx.fillStyle='#6a7e87';bx.fillText('x / lateral',W-92,H-10);bx.save();bx.translate(12,40);bx.rotate(-Math.PI/2);bx.fillText('y / forward',0,0);bx.restore();}
+function drawPairs(points){$('pairTable').innerHTML=points.length?`<table><thead><tr><th>#</th><th>RADAR</th><th>PIXEL</th><th>ERR</th></tr></thead><tbody>${points.map((p,i)=>`<tr><td>${i+1}</td><td>${Number(p.radar_point.x).toFixed(1)}, ${Number(p.radar_point.y).toFixed(1)}</td><td>${Number(p.image_point.u).toFixed(0)}, ${Number(p.image_point.v).toFixed(0)}</td><td>${p.reprojection_error==null?'—':Number(p.reprojection_error).toFixed(2)}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">No pairs yet</div>';}
+function canvasPoint(e,c){const r=c.getBoundingClientRect();return{x:(e.clientX-r.left)*c.width/r.width,y:(e.clientY-r.top)*c.height/r.height}}
+bevCanvas.onclick=e=>{if(!state.pairMode)return;const p=canvasPoint(e,bevCanvas), f=state.frame; const x=-30+p.x/bevCanvas.width*60,y=(1-p.y/bevCanvas.height)*120;let best=f.radar.reduce((a,r)=>{const d=(r.x-x)**2+(r.y-y)**2;return d<a.d?{r,d}:a},{r:null,d:Infinity});if(!best.r||best.d>100){log('点击雷达点附近选择目标',true);return}state.pending=best.r;log(`已选雷达 #${best.r.id}，现在点击图像上的对应车辆`)};
+imageCanvas.onclick=async e=>{if(!state.pairMode||!state.pending)return;const p=canvasPoint(e,imageCanvas),f=state.frame;const u=p.x/(imageCanvas.width/(f.image?.width||1280)),v=p.y/(imageCanvas.height/(f.image?.height||720));try{frameData(await api('/api/points',{method:'POST',body:JSON.stringify({radar_point:{x:state.pending.x,y:state.pending.y},image_point:{u,v}})}));state.pending=null;log('点对已登记，可继续选择或计算')}catch(err){log(err.message,true)}};
+async function refresh(index){try{const f=await api('/api/frame'+(index==null?'':`?index=${index}`));state.frame=f;const s=await api('/api/session');s.frame=f;frameData(s)}catch(e){log(e.message,true)}}
+$('loadBtn').onclick=async()=>{try{const root=$('dataset').value.trim();if(!root)throw Error('请输入服务器上的数据集目录');frameData(await api('/api/load',{method:'POST',body:JSON.stringify({dataset_root:root,sync_folder:$('syncFolder').value||'sync',camera_tracks:$('cameraTracks').value.trim()||null,video:$('videoPath').value.trim()||null})}));log('数据集已加载')}catch(e){log(e.message,true)}};
+$('pairBtn').onclick=()=>{state.pairMode=!state.pairMode;state.pending=null;$('pairBtn').textContent=state.pairMode?'退出点对选择':'开始点对选择';log(state.pairMode?'先点击 BEV 雷达点，再点击相机像素':'点对选择已暂停')};
+$('clearBtn').onclick=async()=>{try{frameData(await api('/api/points/clear',{method:'POST',body:'{}'}));log('点对已清除')}catch(e){log(e.message,true)}};
+$('computeBtn').onclick=async()=>{try{frameData(await api('/api/calibrate',{method:'POST',body:JSON.stringify({ransac_threshold:Number($('threshold').value)})}));log('Homography 已计算，检查留出误差后再导出')}catch(e){log(e.message,true)}};
+$('exportBtn').onclick=async()=>{try{const d=await api('/api/export');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(d,null,2)],{type:'application/json'}));a.download='radarcamcalib_calibration.json';a.click();log('标定 JSON 已导出')}catch(e){log(e.message,true)}};
+$('importBtn').onclick=()=>$('fileInput').click();$('fileInput').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{frameData(await api('/api/points/replace',{method:'POST',body:await f.text()}));log('点对 JSON 已导入')}catch(err){log(err.message,true)}};
+$('analyzeBtn').onclick=async()=>{try{const d=await api('/api/analyze',{method:'POST',body:JSON.stringify({start:Number($('startFrame').value||0),end:$('endFrame').value?Number($('endFrame').value):null,step:Number($('stepFrame').value||1)})});const m=d.metrics;log(`分析完成：${m.radar} radar / ${m.vision} vision / ${m.matched} matched，均值 ${m.mean_bev_error==null?'—':m.mean_bev_error.toFixed(2)} m`)}catch(e){log(e.message,true)}};
+document.addEventListener('keydown',e=>{if(e.key==='ArrowRight'&&state.frame.index+1<state.frame.total)refresh(state.frame.index+1);if(e.key==='ArrowLeft'&&state.frame.index>0)refresh(state.frame.index-1)});
+api('/api/session').then(frameData).catch(e=>log(e.message,true));
+</script>
+</body></html>

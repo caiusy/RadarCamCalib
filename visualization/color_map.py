@@ -7,7 +7,7 @@ and visualization elements.
 
 from typing import Tuple
 
-# 10 distinct colors for point pairs (BGR for OpenCV, hex for Qt)
+# 10 distinct colors for point pairs (BGR for OpenCV, CSS hex for the web client)
 PAIR_COLORS = [
     '#FF4444',  # Red
     '#44FF44',  # Green

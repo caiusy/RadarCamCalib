@@ -1,4 +1,4 @@
-PyQt6>=6.5.0
+# Core numerical and computer-vision dependencies. No desktop UI toolkit is required.
 opencv-python>=4.8.0
 numpy>=1.24.0
 scikit-learn>=1.3.0
