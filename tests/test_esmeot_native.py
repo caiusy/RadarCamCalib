@@ -15,4 +15,4 @@ def test_native_pair_fit_reports_unseen_id_holdout():
     result = fit_native_pairs(pairs, train_end_frame=10, ransac_threshold=1.0)
     assert result["fit"]["holdout_camera_ids"] == 20
     assert result["fit"]["holdout_pixels"]["median"] < 1e-3
-    assert result["annotation_used"] is False
+    assert result["fit"]["annotation_used"] is False
