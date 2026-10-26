@@ -13,6 +13,24 @@ and effective detection area analysis.
 |:---:|:---:|
 | ![preview](assets/preview_v3.png) | ![playback](assets/playback_preview.png) |
 
+上方为已有 GUI 示例截图，展示点对操作和轨迹回放界面，不代表 ES-MEOT 留出标定结果。
+
+### ES-MEOT 标定流程
+
+![ES-MEOT 标定流程：原始雷达与相机检测、RANSAC 拟合、后续帧与新 ID 留出验证](assets/esmeot_calibration_validation.svg)
+
+流程示意：通过配置中的 K/D/R/T 将原始雷达 XYZ 投影到相机图像，筛选框内无歧义点对；
+用前半段序列拟合 Homography，后半段未参与训练的相机 ID 用于验证。
+标定输入不包含 `annotation.npy` 或 CATS 平面点，工具入口为 `tools/fit_esmeot_native.py`。
+
+![ES-MEOT 自动点对留出误差：像素与米制中位数及 95 分位数](assets/esmeot_holdout_errors.png)
+
+上图来自远程 ES-MEOT 实验的汇总统计：3,407 个训练内点，5,699 对留出样本，
+覆盖 110 个未参与训练的相机 ID。像素误差与米制误差分别使用独立坐标轴，
+柱状图只显示中位数和 95 分位数，不代表完整误差分布。
+这是自动点对的有效平面映射残差；雷达目标中心与相机框底边存在尺寸偏差，
+结果不能等同于独立人工点对或实测硬件外参的精度。
+
 ---
 
 ## 功能概览 / Features
