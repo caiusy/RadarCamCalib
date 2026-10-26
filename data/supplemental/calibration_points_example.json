@@ -1,0 +1,17 @@
+{
+  "description": "作者制作的最小雷达-相机点对样例，用于 Web 工作台导入回归。",
+  "coordinate_system": {
+    "radar": "x=lateral metres, y=forward metres",
+    "image": "u/v pixels"
+  },
+  "matched_points": [
+    {"radar_point": {"x": -5.0, "y": 30.0}, "image_point": {"u": 280.0, "v": 520.0}},
+    {"radar_point": {"x": 5.0, "y": 30.0}, "image_point": {"u": 1000.0, "v": 520.0}},
+    {"radar_point": {"x": -3.0, "y": 60.0}, "image_point": {"u": 380.0, "v": 400.0}},
+    {"radar_point": {"x": 3.0, "y": 60.0}, "image_point": {"u": 900.0, "v": 400.0}},
+    {"radar_point": {"x": 0.0, "y": 45.0}, "image_point": {"u": 640.0, "v": 450.0}},
+    {"radar_point": {"x": -7.0, "y": 80.0}, "image_point": {"u": 320.0, "v": 340.0}},
+    {"radar_point": {"x": 7.0, "y": 80.0}, "image_point": {"u": 960.0, "v": 340.0}},
+    {"radar_point": {"x": 0.0, "y": 100.0}, "image_point": {"u": 640.0, "v": 300.0}}
+  ]
+}

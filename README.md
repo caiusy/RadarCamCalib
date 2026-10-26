@@ -48,6 +48,11 @@ ssh -N -L 8765:127.0.0.1:8765 caius-wsl
 BEV 点击雷达目标 → 相机点击对应底边中心 → 计算 Homography → 检查误差 → 导出 JSON。
 左/右方向键可逐帧回放，`分析窗口` 会输出轨迹、关联指标和有效覆盖分析。
 
+仓库中的 `data/supplemental/` 只保存作者自己制作的小型补充样例（例如
+`calibration_points_example.json`），可直接提交用于回归和演示。下载得到的原始数据、
+视频、Numpy 大文件和生成结果继续放在被忽略的 `data/raw/`、`data/interim/`、
+`outputs/` 等目录，不随代码提交。
+
 ### ES-MEOT 标定流程
 
 ![ES-MEOT 标定流程：原始雷达与相机检测、RANSAC 拟合、后续帧与新 ID 留出验证](assets/esmeot_calibration_validation.svg)

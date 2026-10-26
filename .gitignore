@@ -22,6 +22,16 @@ app.log
 crash.log
 .coverage
 
+# Project-owned small supplemental fixtures may be committed. Keep downloaded
+# raw/interim data and generated experiment outputs ignored above.
+!data/supplemental/
+!data/supplemental/**/
+!data/supplemental/**/*.json
+!data/supplemental/**/*.csv
+!data/supplemental/**/*.png
+!data/supplemental/**/*.jpg
+!data/supplemental/**/*.md
+
 # IDE
 .vscode/
 .idea/
