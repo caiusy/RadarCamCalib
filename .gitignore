@@ -9,6 +9,12 @@ build/
 # Data & logs
 dataset/
 mock_dataset/
+data/raw/
+data/interim/
+outputs/
+*.npy
+*.avi
+*.mp4
 *.db
 *.log
 *.pid

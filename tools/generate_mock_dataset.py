@@ -600,7 +600,7 @@ def generate_mock_dataset(
                     draw_vehicle_on_image(road_img, u, v, obj['id'], scale)
 
                     # Collect matched points for first few frames
-                    if frame_idx < 5 and obj['id'] <= 4:
+                    if frame_idx < 5 and obj.get('_gt_id', -1) >= 0:
                         all_matched_points.append({
                             "radar_point": {"x": x, "y": y},
                             "image_point": {"u": round(u, 2), "v": round(v, 2)},

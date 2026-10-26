@@ -72,6 +72,22 @@ python tools/auto_test_evaluation.py --dataset mock_dataset
 python -m unittest discover -s tests -v
 ```
 
+### ES-MEOT 互操作与时间拟合
+
+`data/es_meot_adapter.py` 只读取用户已经放置在本地的可信 ES-MEOT
+`radarTrack.npy` 和 `config`。ES-MEOT 雷达坐标约定为 `x=lateral`,
+`y=vertical`, `z=forward`，所以标定平面使用 `(x, z)`，不能把原始 `(x, y)`
+误当成地面坐标。
+
+```bash
+python tools/fit_esmeot_time.py /path/to/es_meot --camera-fps 20 \
+  --output outputs/esmeot_time_sync.json
+```
+
+该命令只拟合帧时钟映射，不会伪造硬件触发延迟，也不会把数据写入仓库。
+`generate_mock_dataset.py` 现在会稳定导出有效的 `mock_matched_points.json`；
+导出的点对只来自模拟真值，不代表真实 ES-MEOT 标定结果。
+
 ---
 
 ## 项目结构 / Architecture
